@@ -34,6 +34,9 @@ create table public.profiles (
   created_at timestamptz not null default now()
 );
 create index on public.profiles (school_id, role);
+-- One account per phone number / email within a school; invites match on these.
+create unique index profiles_school_phone on public.profiles (school_id, phone) where phone is not null;
+create unique index profiles_school_email on public.profiles (school_id, lower(email)) where email is not null;
 
 create table public.classes (
   id uuid primary key default gen_random_uuid(),
@@ -280,14 +283,8 @@ create policy "read own profile" on public.profiles
   for select to authenticated using (id = auth.uid() and active);
 create policy "admins read school profiles" on public.profiles
   for select to authenticated using (private.is_admin(school_id));
-create policy "teachers read parents of their children" on public.profiles
-  for select to authenticated using (
-    role = 'parent' and exists (
-      select 1 from public.guardians g
-      join public.children c on c.id = g.child_id
-      where g.parent_id = profiles.id and c.class_id is not null and private.teaches_class(c.class_id)
-    )
-  );
+-- Teachers deliberately get no access to parents' profiles (names, phone numbers):
+-- parents hear about their child through the app, and teachers don't contact families.
 create policy "admins update school profiles" on public.profiles
   for update to authenticated using (private.is_admin(school_id)) with check (private.is_admin(school_id));
 
@@ -360,7 +357,11 @@ create policy "admins write pickups" on public.authorised_pickups
 create policy "admins manage invites" on public.invites
   for all to authenticated
   using (private.is_admin(school_id))
-  with check (private.is_admin(school_id) and (role <> 'admin' or private.is_owner(school_id)));
+  with check (
+    private.is_admin(school_id)
+    and created_by = auth.uid()
+    and (role <> 'admin' or private.is_owner(school_id))
+  );
 
 -- audit log: owner reads; nobody updates or deletes
 create policy "owner reads audit log" on public.audit_log
@@ -402,6 +403,15 @@ begin
     if (select school_id from public.children where id = new.child_id) is distinct from new.school_id then
       raise exception 'child belongs to another school';
     end if;
+  elsif tg_table_name = 'invites' then
+    if new.class_id is not null
+       and (select school_id from public.classes where id = new.class_id) is distinct from new.school_id then
+      raise exception 'class belongs to another school';
+    end if;
+    if new.child_id is not null
+       and (select school_id from public.children where id = new.child_id) is distinct from new.school_id then
+      raise exception 'child belongs to another school';
+    end if;
   elsif tg_table_name = 'materials' then
     if (select school_id from public.curriculum_areas where id = new.area_id) is distinct from new.school_id then
       raise exception 'curriculum area belongs to another school';
@@ -420,6 +430,8 @@ create trigger same_school before insert or update on public.guardians
 create trigger same_school before insert or update on public.authorised_pickups
   for each row execute function private.check_same_school();
 create trigger same_school before insert or update on public.materials
+  for each row execute function private.check_same_school();
+create trigger same_school before insert or update on public.invites
   for each row execute function private.check_same_school();
 
 -- Audit trail -------------------------------------------------------------------

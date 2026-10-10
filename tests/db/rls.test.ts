@@ -145,12 +145,12 @@ describe.skipIf(!adminUrl)("database access rules", () => {
     expect(seen).toBe(0);
   });
 
-  it("lets a teacher see the parents of their own children only", async () => {
-    const names = await as(ids.teacher1, async (c) => {
-      const { rows } = await c.query(`select full_name from public.profiles where role = 'parent'`);
-      return rows.map((r) => r.full_name);
+  it("keeps parents' names and phone numbers away from teachers", async () => {
+    const count = await as(ids.teacher1, async (c) => {
+      const { rowCount } = await c.query(`select full_name, phone from public.profiles where role = 'parent'`);
+      return rowCount;
     });
-    expect(names).toEqual(["Parent One"]);
+    expect(count).toBe(0);
   });
 
   it("stops parents and teachers changing child records", async () => {
@@ -263,6 +263,29 @@ describe.skipIf(!adminUrl)("database access rules", () => {
     const adminSees = await as(ids.adminA, async (c) => (await c.query(`select * from public.audit_log`)).rowCount);
     expect(adminSees).toBe(0);
     await expect(as(ids.ownerA, (c) => c.query(`delete from public.audit_log`))).rejects.toThrow(/permission denied/);
+  });
+
+  it("rejects invites that point at another school's class or child, or claim another sender", async () => {
+    const insert = (c: Client, role: string, column: string, value: string, by: string) =>
+      c.query(
+        `insert into public.invites (school_id, role, full_name, phone, ${column}, token_hash, created_by) values ($1, $2, 'X', '+233240000009', $3, $4, $5)`,
+        [ids.schoolA, role, value, `hash-${column}-${by}`, by],
+      );
+    await expect(as(ids.adminA, (c) => insert(c, "parent", "child_id", ids.childB, ids.adminA))).rejects.toThrow(
+      /another school/,
+    );
+    await expect(as(ids.adminA, (c) => insert(c, "teacher", "class_id", ids.classB, ids.adminA))).rejects.toThrow(
+      /another school/,
+    );
+    await expect(as(ids.adminA, (c) => insert(c, "teacher", "class_id", ids.class1, ids.ownerA))).rejects.toThrow(
+      /row-level security/,
+    );
+  });
+
+  it("allows only one account per phone number in a school", async () => {
+    await expect(
+      as(ids.ownerA, (c) => c.query(`update public.profiles set phone = '+233240000001' where id in ($1, $2)`, [ids.parent1, ids.parent2])),
+    ).rejects.toThrow(/duplicate key/);
   });
 
   it("rejects links between schools", async () => {

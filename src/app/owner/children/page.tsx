@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { Empty, PageHeader } from "@/components/ui";
+import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function ChildrenPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
+  // The layout checks too, but layouts are skipped on some client navigations.
+  await requireRole("owner", "admin");
   const { show } = await searchParams;
   const status = show === "left" ? "left" : "active";
   const supabase = await createClient();

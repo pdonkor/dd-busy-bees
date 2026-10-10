@@ -1,6 +1,8 @@
 import { Webhook } from "standardwebhooks";
 import { serverEnv } from "@/lib/env";
+import { normaliseGhanaPhone } from "@/lib/phone";
 import { sendSms } from "@/lib/sms";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * Supabase Auth "Send SMS" hook: Supabase calls this with the one-time login code and
@@ -20,9 +22,23 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid signature" }, { status: 401 });
   }
 
+  // Only text Ghanaian numbers that belong to an active account. Anything else (for
+  // example someone calling the auth API directly to run up the SMS bill) is
+  // acknowledged without sending, so it also can't be used to probe who is registered.
+  const phone = normaliseGhanaPhone(event.user.phone ?? "");
+  if (!phone) return Response.json({});
+  const { data: profile } = await createAdminClient()
+    .from("profiles")
+    .select("id")
+    .eq("phone", phone)
+    .eq("active", true)
+    .limit(1)
+    .maybeSingle();
+  if (!profile) return Response.json({});
+
   try {
     await sendSms(
-      event.user.phone,
+      phone,
       `Your DD Busy Bees login code is ${event.sms.otp}. It expires in 10 minutes. Never share this code.`,
     );
   } catch {

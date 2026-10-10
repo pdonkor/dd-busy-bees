@@ -51,7 +51,12 @@ function PhoneLogin() {
       <Field label="6-digit code">
         <Input name="code" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]*" maxLength={7} required />
       </Field>
-      <SubmitButton pendingText="Checking…">Log in</SubmitButton>
+      <div className="flex flex-wrap items-center gap-3">
+        <SubmitButton pendingText="Checking…">Log in</SubmitButton>
+        <a href="/login" className="text-sm text-stone-600 underline">
+          Use a different number
+        </a>
+      </div>
     </form>
   );
 }

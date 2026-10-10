@@ -1,10 +1,13 @@
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/form-status";
 import { Card, Empty, Field, Input, PageHeader } from "@/components/ui";
+import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { addArea, addMaterial, deleteArea, deleteMaterial } from "../actions";
 
 export default async function CurriculumPage() {
+  // The layout checks too, but layouts are skipped on some client navigations.
+  await requireRole("owner", "admin");
   const supabase = await createClient();
   const { data: areas } = await supabase
     .from("curriculum_areas")

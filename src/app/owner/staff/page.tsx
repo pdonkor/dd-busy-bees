@@ -21,7 +21,7 @@ export default async function StaffPage() {
     supabase
       .from("invites")
       .select("id, full_name, role, phone, email, expires_at")
-      .in("role", ["admin", "teacher"])
+      .in("role", user.role === "owner" ? ["admin", "teacher"] : ["teacher"])
       .is("accepted_at", null)
       .is("revoked_at", null)
       .gt("expires_at", new Date().toISOString())

@@ -1,6 +1,7 @@
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/form-status";
 import { Button, Card, Empty, Field, Input, PageHeader } from "@/components/ui";
+import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { createClass, setClassArchived, updateClass } from "../actions";
 
@@ -35,6 +36,8 @@ function ClassFields({ c }: { c?: ClassRow }) {
 }
 
 export default async function ClassesPage() {
+  // The layout checks too, but layouts are skipped on some client navigations.
+  await requireRole("owner", "admin");
   const supabase = await createClient();
   const [{ data: classes }, { data: children }] = await Promise.all([
     supabase.from("classes").select("*").order("archived").order("name"),

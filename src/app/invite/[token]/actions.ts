@@ -46,7 +46,7 @@ export async function acceptInvite(token: string, _prev: ActionState, formData: 
   let userId: string | undefined;
   const { data: existing } = await admin
     .from("profiles")
-    .select("id, role")
+    .select("id, role, active")
     .eq("school_id", invite.school_id)
     .eq(invite.phone ? "phone" : "email", invite.phone ?? invite.email)
     .maybeSingle();
@@ -54,6 +54,11 @@ export async function acceptInvite(token: string, _prev: ActionState, formData: 
     if (existing.role !== invite.role) {
       await release();
       return { error: "This number or email already has a different kind of account. Please contact the school." };
+    }
+    if (!existing.active) {
+      // Switched-off accounts are switched back on deliberately by the school, not by an invite.
+      await release();
+      return { error: "This account has been switched off. Please ask the school to switch it back on." };
     }
     userId = existing.id;
   } else {
@@ -82,18 +87,25 @@ export async function acceptInvite(token: string, _prev: ActionState, formData: 
     }
   }
 
+  let linkError = null;
   if (invite.role === "teacher" && invite.class_id) {
-    await admin
+    ({ error: linkError } = await admin
       .from("staff_assignments")
-      .upsert({ teacher_id: userId, class_id: invite.class_id, school_id: invite.school_id });
+      .upsert({ teacher_id: userId, class_id: invite.class_id, school_id: invite.school_id }));
   }
   if (invite.role === "parent" && invite.child_id) {
-    await admin.from("guardians").upsert({
+    ({ error: linkError } = await admin.from("guardians").upsert({
       parent_id: userId,
       child_id: invite.child_id,
       school_id: invite.school_id,
       relationship: invite.relationship ?? "parent",
-    });
+    }));
+  }
+  if (linkError) {
+    // The account exists but isn't linked; leave the invite usable so it can be retried.
+    console.error("invite link failed", invite.id, linkError.message);
+    await release();
+    return { error: "Your account was created but we couldn't link it to the school. Please try again." };
   }
   await admin.from("invites").update({ accepted_by: userId }).eq("id", invite.id);
 

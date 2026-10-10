@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/form-status";
 import { Card, Empty, Field, Input, PageHeader } from "@/components/ui";
+import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import {
   addPickup,
@@ -21,6 +22,8 @@ type Guardian = {
 };
 
 export default async function ChildPage({ params }: { params: Promise<{ id: string }> }) {
+  // The layout checks too, but layouts are skipped on some client navigations.
+  await requireRole("owner", "admin");
   const { id } = await params;
   const supabase = await createClient();
   const { data: child } = await supabase.from("children").select("*").eq("id", id).maybeSingle();

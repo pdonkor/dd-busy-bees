@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { firstIssue, type ActionState } from "@/lib/action-state";
+import { classRow, classSchema } from "@/lib/class-schema";
 import { requireRole } from "@/lib/auth";
 import { serverEnv } from "@/lib/env";
 import { normaliseGhanaPhone } from "@/lib/phone";
@@ -45,26 +46,6 @@ function form(formData: FormData) {
 const FAILED = "That didn't save. Please try again.";
 
 // Classes -----------------------------------------------------------------------
-
-const classSchema = z
-  .object({
-    name: text(80).min(1, "Give the class a name."),
-    capacity: z.coerce.number().int().min(1).max(200).optional().or(z.literal("").transform(() => undefined)),
-    min_age_years: z.coerce.number().min(0).max(12).optional().or(z.literal("").transform(() => undefined)),
-    max_age_years: z.coerce.number().min(0).max(12).optional().or(z.literal("").transform(() => undefined)),
-  })
-  .refine((v) => v.min_age_years === undefined || v.max_age_years === undefined || v.min_age_years <= v.max_age_years, {
-    message: "The youngest age must be below the oldest age.",
-  });
-
-function classRow(data: z.infer<typeof classSchema>) {
-  return {
-    name: data.name,
-    capacity: data.capacity ?? null,
-    min_age_months: data.min_age_years === undefined ? null : Math.round(data.min_age_years * 12),
-    max_age_months: data.max_age_years === undefined ? null : Math.round(data.max_age_years * 12),
-  };
-}
 
 export async function createClass(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireRole("owner", "admin");

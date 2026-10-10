@@ -18,6 +18,8 @@ export async function sendPhoneCode(_prev: LoginState, formData: FormData): Prom
   if (error?.status === 429) {
     return { step: "phone", error: "Too many codes requested. Please wait a few minutes and try again." };
   }
+  // Unknown numbers also return an error here; log the rest so delivery problems are visible.
+  if (error && error.status !== 400 && error.status !== 422) console.error("send code failed", error.status, error.message);
   return { step: "code", phone, info: "If this number has an account, we've sent it a 6-digit code." };
 }
 
@@ -29,7 +31,13 @@ export async function verifyPhoneCode(_prev: LoginState, formData: FormData): Pr
 
   const supabase = await createClient();
   const { error } = await supabase.auth.verifyOtp({ phone, token, type: "sms" });
-  if (error) return { step: "code", phone, error: "That code is wrong or has expired." };
+  if (error) {
+    return {
+      step: "code",
+      phone,
+      error: error.status === 429 ? "Too many attempts. Please wait a few minutes." : "That code is wrong or has expired.",
+    };
+  }
   redirect("/");
 }
 
