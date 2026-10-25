@@ -297,4 +297,178 @@ describe.skipIf(!adminUrl)("database access rules", () => {
       ]),
     ).rejects.toThrow(/crosses schools/);
   });
+  describe("daily life", () => {
+    const log1 = "a0000000-0000-0000-0000-0000000000f1";
+
+    it("lets a teacher check in only children in their class, as themselves", async () => {
+      await as(ids.teacher1, (c) =>
+        c.query(`insert into public.attendance (school_id, child_id, checked_in_by) values ($1, $2, $3)`, [
+          ids.schoolA,
+          ids.child1,
+          ids.teacher1,
+        ]),
+      );
+      await expect(
+        as(ids.teacher1, (c) =>
+          c.query(`insert into public.attendance (school_id, child_id, checked_in_by) values ($1, $2, $3)`, [
+            ids.schoolA,
+            ids.child2,
+            ids.teacher1,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      await expect(
+        as(ids.teacher1, (c) =>
+          c.query(`insert into public.attendance (school_id, child_id, checked_in_by) values ($1, $2, $3)`, [
+            ids.schoolA,
+            ids.child1,
+            ids.teacher2,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it("lets a teacher record check-out but not rewrite the check-in", async () => {
+      await db.query(`insert into public.attendance (school_id, child_id, checked_in_by) values ($1, $2, $3)`, [
+        ids.schoolA,
+        ids.child1,
+        ids.teacher1,
+      ]);
+      try {
+        const updated = await as(ids.teacher1, async (c) =>
+          (
+            await c.query(
+              `update public.attendance set checked_out_at = now(), checked_out_by = $2, collected_by = 'Parent One' where child_id = $1`,
+              [ids.child1, ids.teacher1],
+            )
+          ).rowCount,
+        );
+        expect(updated).toBe(1);
+        await expect(
+          as(ids.teacher1, (c) =>
+            c.query(`update public.attendance set checked_in_at = now() - interval '1 hour' where child_id = $1`, [
+              ids.child1,
+            ]),
+          ),
+        ).rejects.toThrow(/school office/);
+        await expect(
+          as(ids.teacher1, (c) =>
+            c.query(`update public.attendance set checked_out_at = now(), checked_out_by = $2 where child_id = $1`, [
+              ids.child1,
+              ids.teacher2,
+            ]),
+          ),
+        ).rejects.toThrow(/person doing it/);
+        expect(await as(ids.parent1, async (c) => (await c.query(`select * from public.attendance`)).rowCount)).toBe(1);
+        expect(await as(ids.parent2, async (c) => (await c.query(`select * from public.attendance`)).rowCount)).toBe(0);
+      } finally {
+        await db.query(`delete from public.attendance`);
+      }
+    });
+
+    it("gives teachers pick-up names for their own class only, without phone numbers", async () => {
+      const mine = await as(ids.teacher1, async (c) => (await c.query(`select * from public.pickup_options($1)`, [ids.child1])).rows);
+      expect(mine).toEqual([{ name: "Parent One", relationship: "mother", is_parent: true }]);
+      const other = await as(ids.teacher1, async (c) => (await c.query(`select * from public.pickup_options($1)`, [ids.child2])).rowCount);
+      expect(other).toBe(0);
+      await expect(as(null, (c) => c.query(`select * from public.pickup_options($1)`, [ids.child1]))).rejects.toThrow(
+        /permission denied/,
+      );
+    });
+
+    it("shows a parent a group log but only their own child's tag on it", async () => {
+      await as(ids.adminA, async (c) => {
+        await c.query(
+          `insert into public.activity_logs (id, school_id, kind, body, logged_by) values ($1, $2, 'activity', 'Pouring water', $3)`,
+          [log1, ids.schoolA, ids.adminA],
+        );
+        await c.query(`insert into public.activity_children (log_id, child_id, school_id) values ($1, $2, $4), ($1, $3, $4)`, [
+          log1,
+          ids.child1,
+          ids.child2,
+          ids.schoolA,
+        ]);
+        await c.query("reset role");
+        await c.query(`set local role authenticated`);
+        await c.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: ids.parent1, aal: "aal1" })]);
+        const logs = await c.query(`select body from public.activity_logs`);
+        const tags = await c.query(`select child_id from public.activity_children`);
+        expect(logs.rows).toEqual([{ body: "Pouring water" }]);
+        expect(tags.rows).toEqual([{ child_id: ids.child1 }]);
+        await c.query(`select set_config('request.jwt.claims', $1, true)`, [JSON.stringify({ sub: ids.ownerB, aal: "aal2" })]);
+        expect((await c.query(`select * from public.activity_logs`)).rowCount).toBe(0);
+      });
+    });
+
+    it("lets a teacher log and tag only their own class, and read back what they wrote", async () => {
+      await as(ids.teacher1, async (c) => {
+        const { rows } = await c.query(
+          `insert into public.activity_logs (school_id, kind, body, logged_by) values ($1, 'meal', 'Ate all', $2) returning id`,
+          [ids.schoolA, ids.teacher1],
+        );
+        await c.query(`insert into public.activity_children (log_id, child_id, school_id) values ($1, $2, $3)`, [
+          rows[0].id,
+          ids.child1,
+          ids.schoolA,
+        ]);
+        await expect(
+          c.query(`insert into public.activity_children (log_id, child_id, school_id) values ($1, $2, $3)`, [
+            rows[0].id,
+            ids.child2,
+            ids.schoolA,
+          ]),
+        ).rejects.toThrow(/row-level security/);
+      });
+      await expect(
+        as(ids.parent1, (c) =>
+          c.query(`insert into public.activity_logs (school_id, kind, body, logged_by) values ($1, 'note', 'x', $2)`, [
+            ids.schoolA,
+            ids.parent1,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+    });
+
+    it("lets only owner/admin manage tasks, and staff tick only tasks open to them", async () => {
+      // Templates are created as the admin and kept for the rest of this test.
+      const create = async (c: Client) => {
+        const a = await c.query(
+          `insert into public.task_templates (school_id, name, frequency) values ($1, 'Check fire extinguisher', 'daily') returning id`,
+          [ids.schoolA],
+        );
+        const b = await c.query(
+          `insert into public.task_templates (school_id, name, frequency, weekday, assignee_id) values ($1, 'Clean water tank', 'weekly', 5, $2) returning id`,
+          [ids.schoolA, ids.teacher2],
+        );
+        return [a.rows[0].id, b.rows[0].id];
+      };
+      await as(ids.adminA, create);
+      const [anyone, forTeacher2] = await create(db);
+      try {
+        await expect(
+          as(ids.teacher1, (c) =>
+            c.query(`insert into public.task_templates (school_id, name, frequency) values ($1, 'x', 'daily')`, [ids.schoolA]),
+          ),
+        ).rejects.toThrow(/row-level security/);
+        const tick = (c: Client, template: string, by: string, date = "now()") =>
+          c.query(
+            `insert into public.task_completions (school_id, template_id, due_date, done_by) values ($1, $2, ((${date}) at time zone 'Africa/Accra')::date, $3)`,
+            [ids.schoolA, template, by],
+          );
+        await as(ids.teacher1, (c) => tick(c, anyone, ids.teacher1));
+        await expect(as(ids.teacher1, (c) => tick(c, forTeacher2, ids.teacher1))).rejects.toThrow(/row-level security/);
+        await as(ids.teacher2, (c) => tick(c, forTeacher2, ids.teacher2));
+        await expect(
+          as(ids.teacher1, (c) => tick(c, anyone, ids.teacher1, "now() + interval '3 days'")),
+        ).rejects.toThrow(/row-level security/);
+        expect(await as(ids.parent1, async (c) => (await c.query(`select * from public.task_templates`)).rowCount)).toBe(0);
+        expect(await as(ids.ownerB, async (c) => (await c.query(`select * from public.task_templates`)).rowCount)).toBe(0);
+        await expect(
+          db.query(`update public.task_templates set assignee_id = $2 where id = $1`, [anyone, ids.parent1]),
+        ).rejects.toThrow(/staff of this school/);
+      } finally {
+        await db.query(`delete from public.task_templates`);
+      }
+    });
+  });
 });
