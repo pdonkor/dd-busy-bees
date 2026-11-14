@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, type ReactNode } from "react";
+import { useActionState, useEffect, type ReactNode } from "react";
 import { Alert } from "@/components/ui";
 import type { ActionState } from "@/lib/action-state";
 import { CopyLink } from "./copy-link";
@@ -11,13 +11,19 @@ export function ActionForm({
   children,
   className = "space-y-3",
   resetOnSuccess = true,
+  onSuccess,
 }: {
   action: (prev: ActionState, formData: FormData) => Promise<ActionState>;
   children: ReactNode;
   className?: string;
   resetOnSuccess?: boolean;
+  onSuccess?: () => void;
 }) {
   const [state, formAction] = useActionState(action, undefined);
+  useEffect(() => {
+    if (state?.success) onSuccess?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once per result, not when the callback changes
+  }, [state]);
   return (
     <form action={formAction} className={className} key={resetOnSuccess && state?.success ? state.success : undefined}>
       {state?.error && <Alert>{state.error}</Alert>}

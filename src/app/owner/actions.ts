@@ -6,12 +6,10 @@ import { z } from "zod";
 import { firstIssue, type ActionState } from "@/lib/action-state";
 import { classRow, classSchema } from "@/lib/class-schema";
 import { requireRole } from "@/lib/auth";
-import { serverEnv } from "@/lib/env";
 import { normaliseGhanaPhone } from "@/lib/phone";
-import { sendSms } from "@/lib/sms";
+import { createInvite } from "@/lib/invites";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { generateToken, hashToken } from "@/lib/tokens";
 
 // Every action re-checks the caller's role here, and the database checks again
 // through row-level security, because the queries below run as the logged-in user.
@@ -126,37 +124,6 @@ export async function deleteMaterial(materialId: string) {
 }
 
 // Invites -------------------------------------------------------------------------
-
-async function createInvite(
-  user: { id: string; schoolId: string },
-  invite: {
-    role: "admin" | "teacher" | "parent";
-    full_name: string;
-    phone?: string | null;
-    email?: string | null;
-    class_id?: string | null;
-    child_id?: string | null;
-    relationship?: string | null;
-  },
-): Promise<ActionState> {
-  const token = generateToken();
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("invites")
-    .insert({ ...invite, school_id: user.schoolId, token_hash: hashToken(token), created_by: user.id });
-  if (error) return { error: "Couldn't create the invite. Please try again." };
-
-  const link = `${serverEnv().APP_URL}/invite/${token}`;
-  if (invite.phone) {
-    try {
-      await sendSms(invite.phone, `You've been invited to DD Busy Bees. Open this link to join: ${link}`);
-    } catch {
-      return { success: "Invite created, but the SMS didn't send. Share this link with them instead:", link };
-    }
-    return { success: `Invite sent by SMS to ${invite.phone}. You can also share this link (valid 7 days):`, link };
-  }
-  return { success: "Invite created. Send this link to them (valid 7 days, works once):", link };
-}
 
 const staffInviteSchema = z.discriminatedUnion("role", [
   z.object({
@@ -343,5 +310,12 @@ export async function removePickup(childId: string, pickupId: string) {
   await requireRole("owner", "admin");
   const supabase = await createClient();
   await supabase.from("authorised_pickups").delete().eq("id", uuid.parse(pickupId));
+  revalidatePath(`/owner/children/${childId}`);
+}
+
+export async function approvePickup(childId: string, pickupId: string) {
+  await requireRole("owner", "admin");
+  const supabase = await createClient();
+  await supabase.from("authorised_pickups").update({ approved: true }).eq("id", uuid.parse(pickupId));
   revalidatePath(`/owner/children/${childId}`);
 }

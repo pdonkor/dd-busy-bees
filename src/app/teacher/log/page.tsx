@@ -12,7 +12,7 @@ export default async function LogPage() {
   const { start, end } = dayRange(today());
   const [{ data: assignments }, { data: children }, { data: areas }, { data: logs }] = await Promise.all([
     supabase.from("staff_assignments").select("classes(id, name)").eq("teacher_id", user.id),
-    supabase.from("children").select("id, first_name, last_name, class_id").eq("status", "active").order("first_name"),
+    supabase.from("children").select("id, first_name, last_name, class_id, photo_consent").eq("status", "active").order("first_name"),
     supabase
       .from("curriculum_areas")
       .select("id, name, materials(id, name, position)")
@@ -20,7 +20,9 @@ export default async function LogPage() {
       .order("position", { referencedTable: "materials" }),
     supabase
       .from("activity_logs")
-      .select("id, kind, body, stage, occurred_at, curriculum_areas(name), materials(name), activity_children(children(first_name))")
+      .select(
+        "id, kind, body, stage, occurred_at, curriculum_areas(name), materials(name), activity_children(children(first_name)), media(id)",
+      )
       .eq("logged_by", user.id)
       .gte("occurred_at", start)
       .lt("occurred_at", end)
@@ -34,7 +36,7 @@ export default async function LogPage() {
       ...cls,
       children: (children ?? [])
         .filter((c) => c.class_id === cls.id)
-        .map((c) => ({ id: c.id, name: `${c.first_name} ${c.last_name.charAt(0)}.` })),
+        .map((c) => ({ id: c.id, name: `${c.first_name} ${c.last_name.charAt(0)}.`, photoConsent: c.photo_consent })),
     }));
 
   return (
@@ -71,7 +73,10 @@ export default async function LogPage() {
                     <span className="text-stone-500"> · {formatTime(l.occurred_at)}</span>
                   </p>
                   {l.body && <p className="text-stone-700">{l.body}</p>}
-                  <p className="text-xs text-stone-500">{names}</p>
+                  <p className="text-xs text-stone-500">
+                    {names}
+                    {(l.media as unknown as unknown[]).length > 0 && " · with photo"}
+                  </p>
                 </div>
                 <form action={deleteLog.bind(null, l.id)}>
                   <button className="min-h-10 px-2 text-red-700 underline">Delete</button>

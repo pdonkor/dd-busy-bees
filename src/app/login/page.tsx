@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Alert } from "@/components/ui";
 import { LoginForm } from "./login-form";
 
@@ -14,6 +15,11 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       </div>
       <p className="mt-6 text-center text-xs text-stone-500">
         Accounts are created by the school. If you don&apos;t have one, please ask the school office.
+      </p>
+      <p className="mt-2 text-center text-sm">
+        <Link href="/enquire" className="text-amber-800 underline">
+          New family? Ask about a place
+        </Link>
       </p>
     </main>
   );

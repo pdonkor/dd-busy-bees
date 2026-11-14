@@ -1,18 +1,19 @@
 import Link from "next/link";
 import { SubmitButton } from "@/components/form-status";
-import { Card, Empty, PageHeader } from "@/components/ui";
+import { Alert, Card, Empty, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { formatDay, formatTime, today } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
-import { checkIn, checkOut } from "./actions";
+import { checkIn, checkOut, checkOutWithPin } from "./actions";
 import { CheckOutForm } from "./check-out-form";
 
-export default async function TeacherHome() {
+export default async function TeacherHome({ searchParams }: { searchParams: Promise<{ incident?: string }> }) {
   const user = await requireRole("teacher");
+  const { incident } = await searchParams;
   const supabase = await createClient();
   const date = today();
   // Row-level security limits this to children in the teacher's own classes.
-  const [{ data: assignments }, { data: children }, { data: attendance }] = await Promise.all([
+  const [{ data: assignments }, { data: children }, { data: attendance }, { data: shift }] = await Promise.all([
     supabase.from("staff_assignments").select("classes(id, name)").eq("teacher_id", user.id),
     supabase
       .from("children")
@@ -23,6 +24,7 @@ export default async function TeacherHome() {
       .from("attendance")
       .select("child_id, checked_in_at, checked_out_at, collected_by, collected_by_unlisted")
       .eq("date", date),
+    supabase.from("staff_shifts").select("clock_in_at, clock_out_at").eq("staff_id", user.id).eq("date", date).maybeSingle(),
   ]);
   const classes = (assignments ?? [])
     .map((a) => a.classes as unknown as { id: string; name: string } | null)
@@ -51,6 +53,21 @@ export default async function TeacherHome() {
           </Link>
         }
       />
+      {incident && (
+        <div className="mb-4">
+          <Alert kind="success">Incident report saved. The parents have been asked to read it.</Alert>
+        </div>
+      )}
+      <Link
+        href="/teacher/clock"
+        className={`mb-4 block rounded-xl border px-4 py-3 text-sm ${
+          shift ? "border-green-200 bg-green-50 text-green-900" : "border-amber-200 bg-amber-50 text-amber-900"
+        }`}
+      >
+        {!shift && "You haven't clocked in today. Scan the QR code at the entrance with your phone camera."}
+        {shift && !shift.clock_out_at && `Clocked in at ${formatTime(shift.clock_in_at)}. Scan again when you leave.`}
+        {shift?.clock_out_at && `Clocked out at ${formatTime(shift.clock_out_at)}.`}
+      </Link>
       {!classes.length && <Empty>You haven&apos;t been added to a class yet. Please ask the school office.</Empty>}
       <div className="space-y-4">
         {classes.map((cls) => {
@@ -65,9 +82,9 @@ export default async function TeacherHome() {
                     <li key={c.id} className="py-3 text-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                          <span className="font-medium">
+                          <Link href={`/teacher/child/${c.id}`} className="font-medium underline-offset-2 hover:underline">
                             {c.first_name} {c.last_name}
-                          </span>
+                          </Link>
                           {c.allergies && (
                             <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800">
                               Allergy: {c.allergies}
@@ -98,7 +115,11 @@ export default async function TeacherHome() {
                         )}
                       </div>
                       {a && !a.checked_out_at && (
-                        <CheckOutForm action={checkOut.bind(null, c.id)} options={pickups.get(c.id) ?? []} />
+                        <CheckOutForm
+                          action={checkOut.bind(null, c.id)}
+                          pinAction={checkOutWithPin.bind(null, c.id)}
+                          options={pickups.get(c.id) ?? []}
+                        />
                       )}
                     </li>
                   );
