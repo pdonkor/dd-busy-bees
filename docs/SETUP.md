@@ -89,6 +89,11 @@ you're in.
 6. **Upkeep tasks**: press *Add Ghana starter list* and edit it.
 7. Open **Staff on site → Open entrance QR screen** on a tablet or old phone at the entrance.
 
+## Before opening to families
+
+Work through [SECURITY.md](SECURITY.md): the Supabase security settings, the load test
+and a backup restore.
+
 ## Optional
 
 - **Cloudflare Turnstile** bot check on the enquiry form: create a widget at

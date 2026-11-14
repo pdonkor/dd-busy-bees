@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import { RegisterServiceWorker } from "@/components/register-sw";
 import "./globals.css";
 
@@ -15,7 +16,10 @@ export const viewport: Viewport = {
   themeColor: "#f59e0b",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // Render every page per request: each one needs that request's script nonce
+  // (src/middleware.ts), which a page built ahead of time can't have.
+  await connection();
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">

@@ -220,11 +220,11 @@ export async function recordPayment(childId: string, _prev: ActionState, formDat
     note: parsed.data.note,
   });
   if (error) return { error: FAILED };
-  let receipt = "Receipt sent by SMS.";
+  let receipt = "Receipt sent to the parents.";
   try {
     await sendReceipt(createAdminClient(), id);
   } catch {
-    receipt = "The receipt SMS didn't send.";
+    receipt = "The receipt didn't send.";
   }
   refresh(childId);
   return { success: `Payment recorded. ${receipt}` };
