@@ -4,14 +4,16 @@ import { useState } from "react";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/form-status";
 import { Field, Select, Textarea } from "@/components/ui";
-import { LOG_KINDS, QUICK_PICKS, STAGES, type LogKind } from "@/lib/log-presets";
+import type { ActionState } from "@/lib/action-state";
+import { KIND_LABEL, LOG_KINDS, QUICK_PICKS, STAGES, type LogKind } from "@/lib/log-presets";
+import { isNetworkError, queueItem } from "@/lib/offline-queue";
 import { logActivity } from "../actions";
 
 type Child = { id: string; name: string; photoConsent: boolean };
 type Group = { id: string; name: string; children: Child[] };
 type Area = { id: string; name: string; materials: { id: string; name: string }[] };
 
-export function LogForm({ groups, areas }: { groups: Group[]; areas: Area[] }) {
+export function LogForm({ groups, areas, userId }: { groups: Group[]; areas: Area[]; userId: string }) {
   const [kind, setKind] = useState<LogKind>("activity");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [areaId, setAreaId] = useState("");
@@ -58,10 +60,47 @@ export function LogForm({ groups, areas }: { groups: Group[]; areas: Area[] }) {
       return next;
     });
 
+  const names = new Map(groups.flatMap((g) => g.children.map((c) => [c.id, c.name] as const)));
+
+  // With no connection, a log without a photo is kept on the phone and sent later.
+  async function submit(prev: ActionState, formData: FormData): Promise<ActionState> {
+    try {
+      return await logActivity(prev, formData);
+    } catch (e) {
+      if (!isNetworkError(e)) throw e;
+      if (hasPhoto) {
+        return { error: "No connection. Photos need a connection: remove the photo to save this log on the phone, or try again later." };
+      }
+      const children = formData.getAll("children").map(String);
+      if (!children.length) return { error: "Choose at least one child." };
+      const kind = String(formData.get("kind") ?? "note") as LogKind;
+      const field = (k: string) => (formData.get(k) ? String(formData.get(k)) : undefined);
+      const who = children.map((id) => names.get(id) ?? "child");
+      try {
+        await queueItem(userId, {
+          type: "log",
+          id: crypto.randomUUID(),
+          at: new Date().toISOString(),
+          kind,
+          children,
+          quick: field("quick"),
+          body: field("body"),
+          area_id: field("area_id"),
+          material_id: field("material_id"),
+          stage: field("stage"),
+          label: `${KIND_LABEL[kind] ?? "Log"} for ${who.length > 3 ? `${who.slice(0, 3).join(", ")} and ${who.length - 3} more` : who.join(", ")}`,
+        });
+      } catch {
+        return { error: "No connection, and this phone couldn't store the log. Please try again when you're back online." };
+      }
+      return { success: "No connection, so this log is saved on the phone. It will send by itself when the connection is back." };
+    }
+  }
+
   // The note and quick pick clear after each log; the chosen children stay picked for the next one.
   return (
     <ActionForm
-      action={logActivity}
+      action={submit}
       className="space-y-5"
       onSuccess={() => {
         setHasPhoto(false);

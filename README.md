@@ -3,7 +3,7 @@
 School management web app for DD Busy Bees Montessori school (Ghana).
 
 - **Owner and office**: today's dashboard (children in, staff on site, ratio alerts, overdue fees, incidents), children and enrolment, enquiry pipeline, fees and payments, parent messages, notices and calendar, oversight (logging coverage, overdue upkeep), staff, rota and clock-ins, lesson plans, termly reports, classes, curriculum, upkeep tasks and settings.
-- **Teachers**: check-in and check-out (parent PIN or pick-up list), one-tap activity logs with photos, upkeep tasks, incident reports, lesson plans, report drafts written from their logs, QR clock-in. Teachers cannot message anyone.
+- **Teachers**: works offline for activity logs and task ticks (saved on the phone and sent when the connection returns), check-in and check-out (parent PIN or pick-up list), one-tap activity logs with photos, upkeep tasks, incident reports, lesson plans, report drafts written from their logs, QR clock-in. Teachers cannot message anyone.
 - **Parents**: their child's day with photos, progress by curriculum area and shared reports, fees with Paystack mobile money and card payments, messages to the office, notices and calendar, the enrolment form, pick-up PIN and SMS settings.
 - **Public**: enquiry form at `/enquire`.
 

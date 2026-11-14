@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app-shell";
+import { OfflineSync } from "@/components/offline-sync";
 import { requireRole } from "@/lib/auth";
 
 const NAV = [
@@ -16,6 +17,7 @@ export default async function TeacherLayout({ children }: { children: React.Reac
   const user = await requireRole("teacher");
   return (
     <AppShell nav={NAV} userName={user.fullName}>
+      <OfflineSync userId={user.id} />
       {children}
     </AppShell>
   );

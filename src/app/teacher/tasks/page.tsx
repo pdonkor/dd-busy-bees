@@ -1,11 +1,11 @@
-import { SubmitButton } from "@/components/form-status";
-import { Card, Empty, Input, PageHeader } from "@/components/ui";
+import { Card, Empty, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { formatDay, today } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { loadTaskStates } from "@/lib/task-status";
 import { describeSchedule } from "@/lib/tasks";
-import { tickTask, untickTask } from "../actions";
+import { untickTask } from "../actions";
+import { TickForm } from "./tick-form";
 
 export default async function MyTasks() {
   const user = await requireRole("teacher");
@@ -51,10 +51,7 @@ export default async function MyTasks() {
                   </form>
                 )
               ) : (
-                <form action={tickTask.bind(null, task.id, dueDate)} className="flex flex-wrap items-center gap-2">
-                  <Input name="note" placeholder="Problem to report? (optional)" maxLength={1000} className="w-auto min-w-56" />
-                  <SubmitButton pendingText="Ticking…">Done</SubmitButton>
-                </form>
+                <TickForm templateId={task.id} dueDate={dueDate} name={task.name} userId={user.id} />
               )}
             </div>
           </Card>

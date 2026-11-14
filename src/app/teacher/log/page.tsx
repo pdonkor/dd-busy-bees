@@ -45,6 +45,7 @@ export default async function LogPage() {
       {groups.length ? (
         <Card>
           <LogForm
+            userId={user.id}
             groups={groups}
             areas={(areas ?? []).map((a) => ({ id: a.id, name: a.name, materials: a.materials }))}
           />
