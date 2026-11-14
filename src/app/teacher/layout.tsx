@@ -5,6 +5,7 @@ const NAV = [
   { href: "/teacher", label: "My day" },
   { href: "/teacher/log", label: "Log activity" },
   { href: "/teacher/tasks", label: "My tasks" },
+  { href: "/teacher/clock", label: "Clock-in history" },
 ];
 
 export default async function TeacherLayout({ children }: { children: React.ReactNode }) {

@@ -575,4 +575,117 @@ describe.skipIf(!adminUrl)("database access rules", () => {
       }
     });
   });
+  describe("money", () => {
+    const plan = "a0000000-0000-0000-0000-000000000101";
+    const feed = "a0000000-0000-0000-0000-000000000102";
+    const inv = "a0000000-0000-0000-0000-000000000103";
+
+    beforeAll(async () => {
+      await db.query(
+        `insert into public.fee_plans (id, school_id, name, kind, amount_pesewas) values ($1, $3, 'Full day', 'termly', 150000), ($2, $3, 'Lunch', 'feeding', 1500)`,
+        [plan, feed, ids.schoolA],
+      );
+      await db.query(
+        `insert into public.invoices (id, school_id, child_id, kind, description, due_on) values ($1, $2, $3, 'one_off', 'Uniform', '2026-12-01')`,
+        [inv, ids.schoolA, ids.child1],
+      );
+      await db.query(
+        `insert into public.invoice_lines (school_id, invoice_id, description, unit_pesewas, quantity) values ($1, $2, 'Uniform', 25000, 2)`,
+        [ids.schoolA, inv],
+      );
+    });
+
+    it("lets only the owner set fees", async () => {
+      const add = (u: string) =>
+        as(u, (c) =>
+          c.query(`insert into public.fee_plans (school_id, name, kind, amount_pesewas) values ($1, 'Books', 'one_off', 5000)`, [
+            ids.schoolA,
+          ]),
+        );
+      await add(ids.ownerA);
+      await expect(add(ids.adminA)).rejects.toThrow(/row-level security/);
+      await expect(add(ids.teacher1)).rejects.toThrow(/row-level security/);
+    });
+
+    it("shows invoices and balances to the office and the child's own parents, never to teachers", async () => {
+      const invoices = (u: string) => as(u, async (c) => (await c.query(`select id from public.invoices`)).rowCount);
+      expect(await invoices(ids.parent1)).toBe(1);
+      expect(await invoices(ids.parent2)).toBe(0);
+      expect(await invoices(ids.teacher1)).toBe(0);
+      expect(await invoices(ids.adminA)).toBe(1);
+      expect(await invoices(ids.ownerB)).toBe(0);
+      const balance = await as(ids.parent1, async (c) =>
+        (await c.query(`select child_id, balance_pesewas::int as b from public.child_balances`)).rows,
+      );
+      expect(balance).toEqual([{ child_id: ids.child1, b: 50000 }]);
+      expect(await as(ids.teacher1, async (c) => (await c.query(`select * from public.child_balances where balance_pesewas <> 0`)).rowCount)).toBe(0);
+    });
+
+    it("charges feeding automatically for each day a child on a feeding plan is checked in", async () => {
+      await db.query(`update public.children set feeding_plan_id = $1 where id = $2`, [feed, ids.child1]);
+      try {
+        await as(ids.teacher1, async (c) => {
+          await c.query(`insert into public.attendance (school_id, child_id, checked_in_by) values ($1, $2, $3)`, [
+            ids.schoolA,
+            ids.child1,
+            ids.teacher1,
+          ]);
+          await c.query("reset role");
+          const { rows } = await c.query(`select amount_pesewas from public.feeding_charges where child_id = $1`, [ids.child1]);
+          expect(rows).toEqual([{ amount_pesewas: 1500 }]);
+        });
+        await expect(db.query(`update public.children set feeding_plan_id = $1 where id = $2`, [plan, ids.child1])).rejects.toThrow(
+          /feeding plan/,
+        );
+      } finally {
+        await db.query(`update public.children set feeding_plan_id = null`);
+      }
+    });
+
+    it("lets the office record cash but never a Paystack payment, and only the owner voids", async () => {
+      const pay = (u: string, method: string) =>
+        as(u, (c) =>
+          c.query(
+            `insert into public.payments (school_id, child_id, amount_pesewas, method, status, paid_at, recorded_by) values ($1, $2, 1000, $3, 'success', now(), $4) returning id`,
+            [ids.schoolA, ids.child1, method, u],
+          ),
+        );
+      await pay(ids.adminA, "cash");
+      await expect(pay(ids.adminA, "paystack")).rejects.toThrow(/row-level security|violates check/);
+      await expect(pay(ids.parent1, "cash")).rejects.toThrow(/row-level security/);
+      await expect(pay(ids.teacher1, "cash")).rejects.toThrow(/row-level security/);
+
+      const { rows } = await db.query(
+        `insert into public.payments (school_id, child_id, amount_pesewas, method, status, paid_at, recorded_by) values ($1, $2, 1000, 'cash', 'success', now(), $3) returning id`,
+        [ids.schoolA, ids.child1, ids.adminA],
+      );
+      const pid = rows[0].id;
+      try {
+        const voidAs = (u: string) =>
+          as(u, async (c) => (await c.query(`update public.payments set status = 'void', void_reason = 'typo' where id = $1`, [pid])).rowCount);
+        expect(await voidAs(ids.adminA)).toBe(0);
+        await expect(
+          as(ids.ownerA, (c) => c.query(`update public.payments set amount_pesewas = 5 where id = $1`, [pid])),
+        ).rejects.toThrow(/only be voided/);
+        expect(await voidAs(ids.ownerA)).toBe(1);
+      } finally {
+        await db.query(`delete from public.payments`);
+      }
+    });
+
+    it("lets an invoice only be voided with a reason, never edited", async () => {
+      await expect(
+        as(ids.ownerA, (c) => c.query(`update public.invoices set due_on = '2030-01-01' where id = $1`, [inv])),
+      ).rejects.toThrow(/only be voided/);
+      const n = await as(ids.ownerA, async (c) =>
+        (await c.query(`update public.invoices set voided_at = now(), void_reason = 'duplicate' where id = $1`, [inv])).rowCount,
+      );
+      expect(n).toBe(1);
+      expect(
+        await as(ids.adminA, async (c) =>
+          (await c.query(`update public.invoices set voided_at = now(), void_reason = 'x' where id = $1`, [inv])).rowCount,
+        ),
+      ).toBe(0);
+    });
+  });
 });

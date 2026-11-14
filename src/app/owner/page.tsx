@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { today } from "@/lib/dates";
+import { formatGhs } from "@/lib/money";
 import { createClient } from "@/lib/supabase/server";
 import { loadTaskStates } from "@/lib/task-status";
 
@@ -11,10 +12,9 @@ export default async function OwnerToday() {
   const now = new Date().toISOString();
   const date = today();
 
-  const [children, staff, classes, invites, unassigned, attendance, tasks] = await Promise.all([
+  const [children, staff, invites, unassigned, attendance, tasks, shifts, balances, overdueInvoices] = await Promise.all([
     supabase.from("children").select("id", { count: "exact", head: true }).eq("status", "active"),
     supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "teacher").eq("active", true),
-    supabase.from("classes").select("id", { count: "exact", head: true }).eq("archived", false),
     supabase
       .from("invites")
       .select("id", { count: "exact", head: true })
@@ -28,15 +28,22 @@ export default async function OwnerToday() {
       .is("class_id", null),
     supabase.from("attendance").select("id, collected_by_unlisted, collected_by, children(first_name)").eq("date", date),
     supabase.from("task_templates").select("id, frequency, weekday, day_of_month, month").eq("active", true),
+    supabase.from("staff_shifts").select("staff_id, clock_out_at").eq("date", date),
+    supabase.from("child_balances").select("child_id, balance_pesewas").gt("balance_pesewas", 0),
+    supabase.from("invoices").select("child_id").is("voided_at", null).lt("due_on", date),
   ]);
+  const staffIn = (shifts.data ?? []).filter((s) => !s.clock_out_at).length;
+  const overdueChildren = new Set((overdueInvoices.data ?? []).map((i) => i.child_id));
+  const owing = (balances.data ?? []).filter((b) => overdueChildren.has(b.child_id));
+  const owed = owing.reduce((s, b) => s + Number(b.balance_pesewas), 0);
   const present = attendance.data?.length ?? 0;
   const unlisted = (attendance.data ?? []).filter((a) => a.collected_by_unlisted);
   const overdue = (await loadTaskStates(supabase, tasks.data ?? [])).filter((s) => s.state === "overdue").length;
 
   const tiles = [
     { label: "In today", value: `${present} / ${children.count ?? 0}`, href: "/owner/attendance" },
-    { label: "Teachers", value: staff.count ?? 0, href: "/owner/staff" },
-    { label: "Classes", value: classes.count ?? 0, href: "/owner/classes" },
+    { label: "Staff on site", value: `${staffIn} / ${staff.count ?? 0}`, href: "/owner/staff-time" },
+    { label: "Overdue fees", value: formatGhs(owed), href: "/owner/fees" },
     { label: "Invites waiting", value: invites.count ?? 0, href: "/owner/staff" },
   ];
 
@@ -76,6 +83,13 @@ export default async function OwnerToday() {
               </Link>
             </li>
           )}
+          {owing.length > 0 && (
+            <li>
+              <Link href="/owner/fees" className="text-amber-800 underline">
+                {owing.length} {owing.length === 1 ? "family has" : "families have"} overdue fees ({formatGhs(owed)})
+              </Link>
+            </li>
+          )}
           {!!unassigned.count && (
             <li>
               <Link href="/owner/children" className="text-amber-800 underline">
@@ -84,8 +98,7 @@ export default async function OwnerToday() {
             </li>
           )}
         </ul>
-        {!unlisted.length && !overdue && !unassigned.count && <p className="text-sm text-stone-600">Nothing right now.</p>}
-        <p className="mt-3 text-xs text-stone-500">Staff on site and fees will appear here as later phases are built.</p>
+        {!unlisted.length && !overdue && !unassigned.count && !owing.length && <p className="text-sm text-stone-600">Nothing right now.</p>}
       </Card>
     </>
   );
