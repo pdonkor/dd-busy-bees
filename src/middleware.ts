@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/invite", "/api/hooks"];
+const PUBLIC_PATHS = ["/login", "/invite", "/api/hooks", "/api/cron", "/api/webhooks", "/enquire"];
 
 /**
  * Keeps the login session fresh on every request and sends logged-out visitors to /login.

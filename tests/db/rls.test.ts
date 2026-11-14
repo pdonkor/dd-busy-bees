@@ -471,4 +471,108 @@ describe.skipIf(!adminUrl)("database access rules", () => {
       }
     });
   });
+  describe("daily life, part 2", () => {
+    it("never lets staff write their own clock-ins, and shows each teacher only their own", async () => {
+      await expect(
+        as(ids.teacher1, (c) =>
+          c.query(`insert into public.staff_shifts (school_id, staff_id) values ($1, $2)`, [ids.schoolA, ids.teacher1]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+      await db.query(`insert into public.staff_shifts (school_id, staff_id) values ($1, $2), ($1, $3)`, [
+        ids.schoolA,
+        ids.teacher1,
+        ids.teacher2,
+      ]);
+      try {
+        const count = (u: string) => as(u, async (c) => (await c.query(`select * from public.staff_shifts`)).rowCount);
+        expect(await count(ids.teacher1)).toBe(1);
+        expect(await count(ids.adminA)).toBe(2);
+        expect(await count(ids.parent1)).toBe(0);
+        expect(await count(ids.ownerB)).toBe(0);
+        const changed = await as(ids.teacher1, async (c) =>
+          (await c.query(`update public.staff_shifts set clock_in_at = now() - interval '2 hours'`)).rowCount,
+        );
+        expect(changed).toBe(0);
+        await expect(
+          db.query(`insert into public.staff_shifts (school_id, staff_id, date) values ($1, $2, '2026-01-05')`, [
+            ids.schoolA,
+            ids.parent1,
+          ]),
+        ).rejects.toThrow(/only staff/);
+      } finally {
+        await db.query(`delete from public.staff_shifts`);
+      }
+    });
+
+    it("keeps pick-up PIN hashes away from every logged-in user", async () => {
+      await db.query(`insert into public.pickup_pins (parent_id, school_id, pin_hash) values ($1, $2, 'x')`, [
+        ids.parent1,
+        ids.schoolA,
+      ]);
+      try {
+        for (const u of [ids.parent1, ids.teacher1, ids.ownerA]) {
+          await expect(as(u, (c) => c.query(`select * from public.pickup_pins`))).rejects.toThrow(/permission denied/);
+        }
+        const has = (u: string) => as(u, async (c) => (await c.query(`select public.has_pickup_pin() as v`)).rows[0].v);
+        expect(await has(ids.parent1)).toBe(true);
+        expect(await has(ids.parent2)).toBe(false);
+      } finally {
+        await db.query(`delete from public.pickup_pins`);
+      }
+    });
+
+    it("lets a parent switch only their own daily SMS", async () => {
+      await as(ids.parent1, async (c) => {
+        await c.query(`select public.set_daily_sms(false)`);
+        await c.query("reset role");
+        const { rows } = await c.query(`select id, daily_sms from public.profiles where id in ($1, $2) order by id`, [
+          ids.parent1,
+          ids.parent2,
+        ]);
+        expect(rows).toEqual([
+          { id: ids.parent1, daily_sms: false },
+          { id: ids.parent2, daily_sms: true },
+        ]);
+      });
+    });
+
+    it("hides a group photo from parents unless every child in it has photo consent", async () => {
+      const log = "a0000000-0000-0000-0000-0000000000f9";
+      await db.query(`insert into public.activity_logs (id, school_id, kind, body, logged_by) values ($1, $2, 'note', 'x', $3)`, [
+        log,
+        ids.schoolA,
+        ids.adminA,
+      ]);
+      await db.query(`insert into public.activity_children (log_id, child_id, school_id) values ($1, $2, $4), ($1, $3, $4)`, [
+        log,
+        ids.child1,
+        ids.child2,
+        ids.schoolA,
+      ]);
+      await db.query(`insert into public.media (school_id, log_id, path, thumb_path) values ($1, $2, 'p', 't')`, [
+        ids.schoolA,
+        log,
+      ]);
+      try {
+        const count = (u: string) => as(u, async (c) => (await c.query(`select * from public.media`)).rowCount);
+        await db.query(`update public.children set photo_consent = true where id = $1`, [ids.child1]);
+        expect(await count(ids.parent1)).toBe(0);
+        expect(await count(ids.teacher1)).toBe(1);
+        await db.query(`update public.children set photo_consent = true where id = $1`, [ids.child2]);
+        expect(await count(ids.parent1)).toBe(1);
+        expect(await count(ids.ownerB)).toBe(0);
+        await expect(
+          as(ids.teacher1, (c) =>
+            c.query(`insert into public.media (school_id, log_id, path, thumb_path) values ($1, $2, 'p2', 't2')`, [
+              ids.schoolA,
+              log,
+            ]),
+          ),
+        ).rejects.toThrow(/row-level security/);
+      } finally {
+        await db.query(`update public.children set photo_consent = false`);
+        await db.query(`delete from public.activity_logs where id = $1`, [log]);
+      }
+    });
+  });
 });

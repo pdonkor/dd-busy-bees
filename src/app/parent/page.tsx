@@ -2,6 +2,7 @@ import { DayNav } from "@/components/day-nav";
 import { Card, Empty, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { dayRange, formatTime, parseDate, today } from "@/lib/dates";
+import { signedUrls } from "@/lib/media";
 import { KIND_LABEL, STAGE_LABEL, type LogKind, type Stage } from "@/lib/log-presets";
 import { createClient } from "@/lib/supabase/server";
 
@@ -13,6 +14,7 @@ type Log = {
   occurred_at: string;
   curriculum_areas: { name: string } | null;
   materials: { name: string } | null;
+  media: { id: string; path: string; thumb_path: string }[];
 };
 
 export default async function ParentHome({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
@@ -31,11 +33,14 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
     supabase
       .from("activity_children")
       .select(
-        "child_id, activity_logs!inner(id, kind, body, stage, occurred_at, curriculum_areas(name), materials(name))",
+        "child_id, activity_logs!inner(id, kind, body, stage, occurred_at, curriculum_areas(name), materials(name), media(id, path, thumb_path))",
       )
       .gte("activity_logs.occurred_at", start)
       .lt("activity_logs.occurred_at", end),
   ]);
+  // Row-level security already dropped photos this parent may not see (e.g. another child without consent).
+  const allMedia = (tags ?? []).flatMap((t) => (t.activity_logs as unknown as Log).media ?? []);
+  const urls = await signedUrls(allMedia.flatMap((m) => [m.path, m.thumb_path]));
   const attendanceByChild = new Map((attendance ?? []).map((a) => [a.child_id, a]));
   const logsByChild = new Map<string, Log[]>();
   for (const t of tags ?? []) {
@@ -73,6 +78,19 @@ export default async function ParentHome({ searchParams }: { searchParams: Promi
                     {!l.materials && l.curriculum_areas && ` · ${l.curriculum_areas.name}`}
                     {l.stage && <span className="text-stone-600"> ({STAGE_LABEL[l.stage].toLowerCase()})</span>}
                     {l.body && <p className="text-stone-700">{l.body}</p>}
+                    {l.media?.map((m) =>
+                      urls.get(m.thumb_path) ? (
+                        <a key={m.id} href={urls.get(m.path)} target="_blank" rel="noreferrer" className="mt-2 block">
+                          {/* eslint-disable-next-line @next/next/no-img-element -- short-lived signed links, not optimisable */}
+                          <img
+                            src={urls.get(m.thumb_path)}
+                            alt={`Photo: ${KIND_LABEL[l.kind]}`}
+                            loading="lazy"
+                            className="max-h-60 rounded-lg border border-stone-200"
+                          />
+                        </a>
+                      ) : null,
+                    )}
                   </li>
                 ))}
                 {a?.checked_out_at && (

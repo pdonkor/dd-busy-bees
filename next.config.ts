@@ -27,6 +27,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Photos are shrunk on the phone first; this leaves room for older phones that can't.
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
