@@ -32,6 +32,8 @@ export function serverEnv() {
       PAYSTACK_PLACEHOLDER_EMAIL_DOMAIN: z.string().default("parents.ddbusybees.com"),
       // Cloudflare Turnstile bot check on the public enquiry form (optional).
       TURNSTILE_SECRET_KEY: z.string().optional(),
+      // Which school the public enquiry form belongs to; defaults to the only school.
+      PUBLIC_SCHOOL_ID: z.string().uuid().optional(),
     })
     .parse(process.env);
 }

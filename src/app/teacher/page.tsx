@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { SubmitButton } from "@/components/form-status";
-import { Card, Empty, PageHeader } from "@/components/ui";
+import { Alert, Card, Empty, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { formatDay, formatTime, today } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { checkIn, checkOut, checkOutWithPin } from "./actions";
 import { CheckOutForm } from "./check-out-form";
 
-export default async function TeacherHome() {
+export default async function TeacherHome({ searchParams }: { searchParams: Promise<{ incident?: string }> }) {
   const user = await requireRole("teacher");
+  const { incident } = await searchParams;
   const supabase = await createClient();
   const date = today();
   // Row-level security limits this to children in the teacher's own classes.
@@ -52,6 +53,11 @@ export default async function TeacherHome() {
           </Link>
         }
       />
+      {incident && (
+        <div className="mb-4">
+          <Alert kind="success">Incident report saved. The parents have been asked to read it.</Alert>
+        </div>
+      )}
       <Link
         href="/teacher/clock"
         className={`mb-4 block rounded-xl border px-4 py-3 text-sm ${
@@ -76,9 +82,9 @@ export default async function TeacherHome() {
                     <li key={c.id} className="py-3 text-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div>
-                          <span className="font-medium">
+                          <Link href={`/teacher/child/${c.id}`} className="font-medium underline-offset-2 hover:underline">
                             {c.first_name} {c.last_name}
-                          </span>
+                          </Link>
                           {c.allergies && (
                             <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-800">
                               Allergy: {c.allergies}

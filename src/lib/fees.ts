@@ -171,9 +171,9 @@ export async function sendFeeReminders(admin: Admin, schoolId: string, period: s
   const [{ data: balances }, { data: overdue }] = await Promise.all([
     admin
       .from("child_balances")
-      .select("child_id, balance_pesewas, children!inner(first_name, status)")
+      .select("child_id, balance_pesewas, first_name")
       .eq("school_id", schoolId)
-      .eq("children.status", "active")
+      .eq("status", "active")
       .gt("balance_pesewas", 0),
     admin.from("invoices").select("child_id").eq("school_id", schoolId).is("voided_at", null).lt("due_on", date),
   ]);
@@ -189,7 +189,7 @@ export async function sendFeeReminders(admin: Admin, schoolId: string, period: s
   return sendBatch(
     admin,
     owing.flatMap((b) => {
-      const name = (b.children as unknown as { first_name: string }).first_name;
+      const name = b.first_name as string;
       const message = `DD Busy Bees: ${name}'s fees balance is ${formatGhs(Number(b.balance_pesewas))}. Pay by mobile money or card at ${appUrl}/parent/fees or at the office. Thank you.`;
       return (guardians ?? [])
         .filter((g) => g.child_id === b.child_id)

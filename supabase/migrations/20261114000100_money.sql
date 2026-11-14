@@ -119,6 +119,12 @@ as
 select
   c.id as child_id,
   c.school_id,
+  -- A few child fields, so lists of balances don't need a second query.
+  c.first_name,
+  c.last_name,
+  c.status,
+  c.class_id,
+  c.fee_plan_id,
   coalesce(inv.total, 0) as invoiced_pesewas,
   coalesce(feed.total, 0) as feeding_pesewas,
   coalesce(paid.total, 0) as paid_pesewas,
@@ -334,3 +340,7 @@ create trigger audit after insert or update or delete on public.payments
   for each row execute function private.write_audit();
 create trigger audit after insert or update or delete on public.feeding_charges
   for each row execute function private.write_audit();
+
+-- Nothing in this migration is for logged-out visitors (row-level security already
+-- returns nothing to them; this removes table access altogether).
+revoke all on all tables in schema public from anon;

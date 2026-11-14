@@ -688,4 +688,205 @@ describe.skipIf(!adminUrl)("database access rules", () => {
       ).toBe(0);
     });
   });
+  describe("oversight and communication", () => {
+    it("never lets a teacher send or read a message, and keeps each parent to their own conversation", async () => {
+      const send = (u: string, parent: string) =>
+        as(u, (c) =>
+          c.query(`insert into public.messages (school_id, parent_id, sender_id, body) values ($1, $2, $3, 'Hello')`, [
+            ids.schoolA,
+            parent,
+            u,
+          ]),
+        );
+      await send(ids.parent1, ids.parent1);
+      await send(ids.adminA, ids.parent1);
+      await expect(send(ids.teacher1, ids.parent1)).rejects.toThrow(/row-level security/);
+      await expect(send(ids.teacher1, ids.teacher1)).rejects.toThrow(/row-level security/);
+      await expect(send(ids.parent1, ids.parent2)).rejects.toThrow(/row-level security/);
+      await expect(send(ids.adminA, ids.teacher1)).rejects.toThrow(/row-level security/);
+      await expect(
+        as(ids.teacher1, (c) =>
+          c.query(`insert into public.announcements (school_id, title, body, created_by) values ($1, 'x', 'y', $2)`, [
+            ids.schoolA,
+            ids.teacher1,
+          ]),
+        ),
+      ).rejects.toThrow(/row-level security/);
+
+      await db.query(`insert into public.messages (school_id, parent_id, sender_id, body) values ($1, $2, $2, 'Hi')`, [
+        ids.schoolA,
+        ids.parent1,
+      ]);
+      try {
+        const count = (u: string) => as(u, async (c) => (await c.query(`select * from public.messages`)).rowCount);
+        expect(await count(ids.parent1)).toBe(1);
+        expect(await count(ids.parent2)).toBe(0);
+        expect(await count(ids.teacher1)).toBe(0);
+        expect(await count(ids.adminA)).toBe(1);
+        expect(await count(ids.ownerB)).toBe(0);
+      } finally {
+        await db.query(`delete from public.messages`);
+      }
+    });
+
+    it("shows class announcements only to that class's families", async () => {
+      await db.query(
+        `insert into public.announcements (school_id, class_id, title, body, created_by) values ($1, $2, 'Bees trip', 'x', $4), ($1, null, 'All', 'y', $4), ($1, $3, 'Butterflies', 'z', $4)`,
+        [ids.schoolA, ids.class1, ids.class2, ids.ownerA],
+      );
+      try {
+        const titles = (u: string) =>
+          as(u, async (c) => (await c.query(`select title from public.announcements order by title`)).rows.map((r) => r.title));
+        expect(await titles(ids.parent1)).toEqual(["All", "Bees trip"]);
+        expect(await titles(ids.parent2)).toEqual(["All", "Butterflies"]);
+        expect(await titles(ids.teacher1)).toEqual(["All", "Bees trip", "Butterflies"]);
+        expect(await titles(ids.ownerB)).toEqual([]);
+      } finally {
+        await db.query(`delete from public.announcements`);
+      }
+    });
+
+    it("lets incidents be reported by the child's teacher, acknowledged by a parent and signed off by the office, never edited", async () => {
+      const report = (u: string, child: string) =>
+        as(u, async (c) =>
+          (
+            await c.query(
+              `insert into public.incidents (school_id, child_id, kind, occurred_at, description, reported_by) values ($1, $2, 'accident', now(), 'Fell over', $3) returning id`,
+              [ids.schoolA, child, u],
+            )
+          ).rows[0].id,
+        );
+      await expect(report(ids.teacher1, ids.child2)).rejects.toThrow(/row-level security/);
+      await expect(report(ids.parent1, ids.child1)).rejects.toThrow(/row-level security/);
+      const { rows } = await db.query(
+        `insert into public.incidents (school_id, child_id, kind, occurred_at, description, reported_by) values ($1, $2, 'accident', now(), 'Fell over', $3) returning id`,
+        [ids.schoolA, ids.child1, ids.teacher1],
+      );
+      const id = rows[0].id;
+      try {
+        // as() rolls back, so each check reads its own change back as the database owner.
+        const ackBy = (u: string) =>
+          as(u, async (c) => {
+            await c.query(`select public.acknowledge_incident($1)`, [id]);
+            await c.query("reset role");
+            return (await c.query(`select parent_ack_by from public.incidents where id = $1`, [id])).rows[0].parent_ack_by;
+          });
+        expect(await ackBy(ids.parent2)).toBeNull();
+        expect(await ackBy(ids.parent1)).toBe(ids.parent1);
+        await expect(
+          as(ids.adminA, (c) => c.query(`update public.incidents set description = 'Nothing happened' where id = $1`, [id])),
+        ).rejects.toThrow(/not changed/);
+        const n = await as(ids.adminA, async (c) =>
+          (await c.query(`update public.incidents set owner_signoff_at = now(), owner_note = 'ok' where id = $1`, [id])).rowCount,
+        );
+        expect(n).toBe(1);
+        expect(await as(ids.teacher1, async (c) => (await c.query(`update public.incidents set owner_note = 'x'`)).rowCount)).toBe(0);
+      } finally {
+        await db.query(`delete from public.incidents`);
+      }
+    });
+
+    it("lets a parent fill in only their own child's enrolment pack and only request pick-up people", async () => {
+      const saved = await as(ids.parent1, async (c) => {
+        await c.query(`select public.submit_enrolment($1, 'Peanuts', '', 'Dr Asante', '0302000000', true, false)`, [ids.child1]);
+        await c.query("reset role");
+        return (await c.query(`select allergies, photo_consent from public.children where id = $1`, [ids.child1])).rows[0];
+      });
+      expect(saved).toEqual({ allergies: "Peanuts", photo_consent: true });
+      await expect(
+        as(ids.parent1, (c) => c.query(`select public.submit_enrolment($1, 'x', '', '', '', true, true)`, [ids.child2])),
+      ).rejects.toThrow(/not your child/);
+      try {
+        await expect(
+          as(ids.parent1, (c) =>
+            c.query(
+              `insert into public.authorised_pickups (school_id, child_id, full_name, approved, requested_by) values ($1, $2, 'Uncle Kwame', true, $3)`,
+              [ids.schoolA, ids.child1, ids.parent1],
+            ),
+          ),
+        ).rejects.toThrow(/row-level security/);
+        await as(ids.parent1, (c) =>
+          c.query(
+            `insert into public.authorised_pickups (school_id, child_id, full_name, approved, requested_by) values ($1, $2, 'Uncle Kwame', false, $3)`,
+            [ids.schoolA, ids.child1, ids.parent1],
+          ),
+        );
+        await db.query(
+          `insert into public.authorised_pickups (school_id, child_id, full_name, approved, requested_by) values ($1, $2, 'Uncle Kwame', false, $3)`,
+          [ids.schoolA, ids.child1, ids.parent1],
+        );
+        const names = await as(ids.teacher1, async (c) =>
+          (await c.query(`select name from public.pickup_options($1)`, [ids.child1])).rows.map((r) => r.name),
+        );
+        expect(names).toEqual(["Parent One"]);
+        await db.query(`insert into public.emergency_contacts (school_id, child_id, full_name, phone) values ($1, $2, 'Auntie', '0240000000')`, [
+          ids.schoolA,
+          ids.child1,
+        ]);
+        expect(await as(ids.teacher1, async (c) => (await c.query(`select * from public.emergency_contacts`)).rowCount)).toBe(0);
+        expect(await as(ids.parent1, async (c) => (await c.query(`select * from public.emergency_contacts`)).rowCount)).toBe(1);
+      } finally {
+        await db.query(`update public.children set allergies = null, photo_consent = false, doctor_name = null, doctor_phone = null`);
+        await db.query(`delete from public.authorised_pickups`);
+        await db.query(`delete from public.emergency_contacts`);
+      }
+    });
+
+    it("keeps enquiries to the office", async () => {
+      await db.query(
+        `insert into public.enquiries (school_id, parent_name, phone, child_first_name, child_last_name, child_dob) values ($1, 'Abena', '+233241234567', 'Yaw', 'Asare', '2023-01-01')`,
+        [ids.schoolA],
+      );
+      try {
+        const count = (u: string) => as(u, async (c) => (await c.query(`select * from public.enquiries`)).rowCount);
+        expect(await count(ids.adminA)).toBe(1);
+        expect(await count(ids.teacher1)).toBe(0);
+        expect(await count(ids.parent1)).toBe(0);
+        await expect(as(null, (c) => c.query(`select * from public.enquiries`))).rejects.toThrow(/permission denied/);
+      } finally {
+        await db.query(`delete from public.enquiries`);
+      }
+    });
+
+    it("lets teachers draft reports, only the office share them, and parents read only shared ones", async () => {
+      const term = (
+        await db.query(
+          `insert into public.terms (school_id, name, starts_on, ends_on, fees_due_on) values ($1, 'Term 1', '2026-09-01', '2026-12-15', '2026-09-15') returning id`,
+          [ids.schoolA],
+        )
+      ).rows[0].id;
+      try {
+        const id = await as(ids.teacher1, async (c) =>
+          (
+            await c.query(
+              `insert into public.reports (school_id, child_id, term_id, body, author_id) values ($1, $2, $3, 'A lovely term', $4) returning id`,
+              [ids.schoolA, ids.child1, term, ids.teacher1],
+            )
+          ).rows[0].id,
+        );
+        void id;
+        const { rows } = await db.query(
+          `insert into public.reports (school_id, child_id, term_id, body, author_id) values ($1, $2, $3, 'A lovely term', $4) returning id`,
+          [ids.schoolA, ids.child1, term, ids.teacher1],
+        );
+        const rid = rows[0].id;
+        const parentSees = () => as(ids.parent1, async (c) => (await c.query(`select * from public.reports`)).rowCount);
+        expect(await parentSees()).toBe(0);
+        await expect(as(ids.teacher1, (c) => c.query(`update public.reports set shared_at = now() where id = $1`, [rid]))).rejects.toThrow(
+          /only the office/,
+        );
+        expect(
+          await as(ids.adminA, async (c) => (await c.query(`update public.reports set shared_at = now() where id = $1`, [rid])).rowCount),
+        ).toBe(1);
+        await db.query(`update public.reports set shared_at = now() where id = $1`, [rid]);
+        expect(await parentSees()).toBe(1);
+        await expect(as(ids.teacher1, (c) => c.query(`update public.reports set body = 'changed' where id = $1`, [rid]))).rejects.toThrow(
+          /has been shared/,
+        );
+        expect(await as(ids.teacher2, async (c) => (await c.query(`select * from public.reports`)).rowCount)).toBe(0);
+      } finally {
+        await db.query(`delete from public.terms`);
+      }
+    });
+  });
 });

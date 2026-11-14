@@ -11,6 +11,7 @@ type ClassRow = {
   capacity: number | null;
   min_age_months: number | null;
   max_age_months: number | null;
+  ratio_children_per_adult: number | null;
   archived: boolean;
 };
 
@@ -18,7 +19,7 @@ const years = (months: number | null) => (months === null ? "" : String(months /
 
 function ClassFields({ c }: { c?: ClassRow }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-5">
       <Field label="Name">
         <Input name="name" defaultValue={c?.name} required maxLength={80} placeholder="e.g. Bumblebees" />
       </Field>
@@ -30,6 +31,9 @@ function ClassFields({ c }: { c?: ClassRow }) {
       </Field>
       <Field label="Age to (years)">
         <Input name="max_age_years" type="number" min={0} max={12} step={0.5} defaultValue={years(c?.max_age_months ?? null)} />
+      </Field>
+      <Field label="Children per adult" hint="Warns when the class goes over.">
+        <Input name="ratio_children_per_adult" type="number" min={1} max={40} defaultValue={c?.ratio_children_per_adult ?? ""} />
       </Field>
     </div>
   );

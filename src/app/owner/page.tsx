@@ -3,6 +3,7 @@ import { Card, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { today } from "@/lib/dates";
 import { formatGhs } from "@/lib/money";
+import { classRatios } from "@/lib/oversight";
 import { createClient } from "@/lib/supabase/server";
 import { loadTaskStates } from "@/lib/task-status";
 
@@ -32,6 +33,15 @@ export default async function OwnerToday() {
     supabase.from("child_balances").select("child_id, balance_pesewas").gt("balance_pesewas", 0),
     supabase.from("invoices").select("child_id").is("voided_at", null).lt("due_on", date),
   ]);
+  const [ratios, incidents, enquiries, messages, pickupRequests] = await Promise.all([
+    classRatios(supabase),
+    supabase.from("incidents").select("id", { count: "exact", head: true }).is("owner_signoff_at", null),
+    supabase.from("enquiries").select("id", { count: "exact", head: true }).eq("stage", "enquiry"),
+    supabase.from("messages").select("parent_id, sender_id").is("read_at", null),
+    supabase.from("authorised_pickups").select("child_id, children(first_name)").eq("approved", false),
+  ]);
+  const overRatio = ratios.filter((r) => r.over);
+  const unreadFromParents = (messages.data ?? []).filter((m) => m.sender_id === m.parent_id).length;
   const staffIn = (shifts.data ?? []).filter((s) => !s.clock_out_at).length;
   const overdueChildren = new Set((overdueInvoices.data ?? []).map((i) => i.child_id));
   const owing = (balances.data ?? []).filter((b) => overdueChildren.has(b.child_id));
@@ -68,6 +78,41 @@ export default async function OwnerToday() {
       </div>
       <Card title="Needs attention" className="mt-6">
         <ul className="space-y-2 text-sm">
+          {overRatio.map((r) => (
+            <li key={r.id}>
+              <Link href="/owner/oversight" className="font-semibold text-red-800 underline">
+                {r.name} is over ratio: {r.childrenIn} children with {r.staffIn} staff (limit 1:{r.ratio})
+              </Link>
+            </li>
+          ))}
+          {!!incidents.count && (
+            <li>
+              <Link href="/owner/incidents" className="text-red-800 underline">
+                {incidents.count} incident {incidents.count === 1 ? "report needs" : "reports need"} your sign-off
+              </Link>
+            </li>
+          )}
+          {unreadFromParents > 0 && (
+            <li>
+              <Link href="/owner/messages" className="text-amber-800 underline">
+                {unreadFromParents} unread {unreadFromParents === 1 ? "message" : "messages"} from parents
+              </Link>
+            </li>
+          )}
+          {!!enquiries.count && (
+            <li>
+              <Link href="/owner/enquiries" className="text-amber-800 underline">
+                {enquiries.count} new {enquiries.count === 1 ? "enquiry" : "enquiries"} about a place
+              </Link>
+            </li>
+          )}
+          {(pickupRequests.data ?? []).map((p, i) => (
+            <li key={i}>
+              <Link href={`/owner/children/${p.child_id}`} className="text-amber-800 underline">
+                A parent asked to add someone to {(p.children as unknown as { first_name: string } | null)?.first_name}&apos;s pick-up list
+              </Link>
+            </li>
+          ))}
           {unlisted.map((a) => (
             <li key={a.id}>
               <Link href="/owner/attendance" className="text-red-800 underline">
@@ -98,7 +143,15 @@ export default async function OwnerToday() {
             </li>
           )}
         </ul>
-        {!unlisted.length && !overdue && !unassigned.count && !owing.length && <p className="text-sm text-stone-600">Nothing right now.</p>}
+        {!unlisted.length &&
+          !overdue &&
+          !unassigned.count &&
+          !owing.length &&
+          !overRatio.length &&
+          !incidents.count &&
+          !unreadFromParents &&
+          !enquiries.count &&
+          !pickupRequests.data?.length && <p className="text-sm text-stone-600">Nothing right now.</p>}
       </Card>
     </>
   );

@@ -4,8 +4,10 @@ import { SubmitButton } from "@/components/form-status";
 import { Card, Empty, Field, Input, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import Link from "next/link";
 import {
   addPickup,
+  approvePickup,
   inviteParent,
   removeGuardian,
   removePickup,
@@ -29,10 +31,10 @@ export default async function ChildPage({ params }: { params: Promise<{ id: stri
   const { data: child } = await supabase.from("children").select("*").eq("id", id).maybeSingle();
   if (!child) notFound();
 
-  const [{ data: classes }, { data: guardians }, { data: pickups }, { data: invites }] = await Promise.all([
+  const [{ data: classes }, { data: guardians }, { data: pickups }, { data: invites }, { data: contacts }] = await Promise.all([
     supabase.from("classes").select("id, name").eq("archived", false).order("name"),
     supabase.from("guardians").select("parent_id, relationship, profiles(full_name, phone, active)").eq("child_id", id),
-    supabase.from("authorised_pickups").select("id, full_name, phone, relationship").eq("child_id", id),
+    supabase.from("authorised_pickups").select("id, full_name, phone, relationship, approved").eq("child_id", id),
     supabase
       .from("invites")
       .select("id, full_name, phone, expires_at")
@@ -40,14 +42,22 @@ export default async function ChildPage({ params }: { params: Promise<{ id: stri
       .is("accepted_at", null)
       .is("revoked_at", null)
       .gt("expires_at", new Date().toISOString()),
+    supabase.from("emergency_contacts").select("id, full_name, phone, relationship").eq("child_id", id),
   ]);
+  const extra = child as { doctor_name: string | null; doctor_phone: string | null; enrolment_submitted_at: string | null };
   const c = child as ChildRow;
 
   return (
     <>
       <PageHeader
         title={`${c.first_name} ${c.last_name}`}
-        subtitle={c.status === "left" ? "Has left the school" : undefined}
+        subtitle={
+          c.status === "left"
+            ? "Has left the school"
+            : extra.enrolment_submitted_at
+              ? "Enrolment form completed by the parent"
+              : "Waiting for the parent to complete the enrolment form"
+        }
         action={
           <form action={setChildStatus.bind(null, c.id, c.status === "active" ? "left" : "active")}>
             <SubmitButton variant="secondary" pendingText="Saving…">
@@ -102,6 +112,31 @@ export default async function ChildPage({ params }: { params: Promise<{ id: stri
               <SubmitButton pendingText="Sending invite…">Invite parent</SubmitButton>
             </ActionForm>
           </Card>
+          <Card title="Emergency contacts and doctor">
+            {!contacts?.length && !extra.doctor_name && <p className="text-sm text-stone-500">None given yet.</p>}
+            <ul className="text-sm">
+              {contacts?.map((ec) => (
+                <li key={ec.id} className="py-1">
+                  {ec.full_name}
+                  {ec.relationship && ` (${ec.relationship})`} · {ec.phone}
+                </li>
+              ))}
+              {extra.doctor_name && (
+                <li className="py-1">
+                  Doctor: {extra.doctor_name}
+                  {extra.doctor_phone && ` · ${extra.doctor_phone}`}
+                </li>
+              )}
+            </ul>
+            <div className="mt-3 flex flex-wrap gap-3 text-sm">
+              <Link href={`/owner/fees/${c.id}`} className="text-amber-800 underline">
+                Fees account
+              </Link>
+              <Link href={`/owner/children/${c.id}/progress`} className="text-amber-800 underline">
+                Progress
+              </Link>
+            </div>
+          </Card>
           <Card title="Who else may pick up">
             <p className="mb-2 text-xs text-stone-500">Parents linked above can always pick up.</p>
             <ul className="mb-3 divide-y divide-stone-100 text-sm">
@@ -111,10 +146,18 @@ export default async function ChildPage({ params }: { params: Promise<{ id: stri
                     {p.full_name}
                     {p.relationship && ` (${p.relationship})`}
                     {p.phone && ` · ${p.phone}`}
+                    {!p.approved && <span className="ml-1 text-amber-800">asked for by parent</span>}
                   </span>
-                  <form action={removePickup.bind(null, c.id, p.id)}>
-                    <button className="min-h-10 px-2 text-red-700 underline">Remove</button>
-                  </form>
+                  <span className="flex">
+                    {!p.approved && (
+                      <form action={approvePickup.bind(null, c.id, p.id)}>
+                        <button className="min-h-10 px-2 text-green-800 underline">Approve</button>
+                      </form>
+                    )}
+                    <form action={removePickup.bind(null, c.id, p.id)}>
+                      <button className="min-h-10 px-2 text-red-700 underline">Remove</button>
+                    </form>
+                  </span>
                 </li>
               ))}
             </ul>

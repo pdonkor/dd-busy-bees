@@ -2,8 +2,11 @@ import { AppShell } from "@/components/app-shell";
 import { requireRole } from "@/lib/auth";
 
 const NAV = [
-  { href: "/parent", label: "My children" },
+  { href: "/parent", label: "Today" },
+  { href: "/parent/progress", label: "Progress" },
   { href: "/parent/fees", label: "Fees" },
+  { href: "/parent/messages", label: "Messages" },
+  { href: "/parent/notices", label: "Notices" },
   { href: "/parent/account", label: "My account" },
 ];
 

@@ -225,3 +225,7 @@ begin
     $sql$;
   end if;
 end $$;
+
+-- Nothing in this migration is for logged-out visitors (row-level security already
+-- returns nothing to them; this removes table access altogether).
+revoke all on all tables in schema public from anon;

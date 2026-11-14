@@ -14,20 +14,29 @@ export default async function FeesPage({ searchParams }: { searchParams: Promise
   const supabase = await createClient();
   const date = today();
   const monthStart = `${date.slice(0, 7)}-01`;
-  const [{ data: balances }, { data: terms }, { data: monthPayments }] = await Promise.all([
+  const [{ data: balances }, { data: classList }, { data: terms }, { data: monthPayments }] = await Promise.all([
     supabase
       .from("child_balances")
-      .select("child_id, balance_pesewas, children!inner(first_name, last_name, status, fee_plan_id, classes(name))")
+      .select("child_id, balance_pesewas, first_name, last_name, status, fee_plan_id, class_id")
       .order("balance_pesewas", { ascending: false }),
+    supabase.from("classes").select("id, name"),
     supabase.from("terms").select("id, name, starts_on, ends_on, fees_due_on, invoices_generated_at").order("starts_on", { ascending: false }).limit(6),
     supabase.from("payments").select("amount_pesewas").eq("status", "success").gte("paid_at", `${monthStart}T00:00:00Z`),
   ]);
-  type Row = {
-    child_id: string;
-    balance_pesewas: number;
-    children: { first_name: string; last_name: string; status: string; fee_plan_id: string | null; classes: { name: string } | null };
-  };
-  const rows = ((balances ?? []) as unknown as Row[]).filter(
+  const className = new Map((classList ?? []).map((c) => [c.id, c.name]));
+  const rows = (balances ?? [])
+    .map((b) => ({
+      child_id: b.child_id as string,
+      balance_pesewas: Number(b.balance_pesewas),
+      children: {
+        first_name: b.first_name as string,
+        last_name: b.last_name as string,
+        status: b.status as string,
+        fee_plan_id: b.fee_plan_id as string | null,
+        classes: b.class_id ? { name: className.get(b.class_id) ?? "" } : null,
+      },
+    }))
+    .filter(
     (r) =>
       (r.children.status === "active" || Number(r.balance_pesewas) !== 0) &&
       `${r.children.first_name} ${r.children.last_name}`.toLowerCase().includes(q.toLowerCase()),

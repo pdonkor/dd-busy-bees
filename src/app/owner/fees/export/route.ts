@@ -73,15 +73,14 @@ export async function GET(request: Request) {
   } else if (kind === "balances") {
     const { data } = await supabase
       .from("child_balances")
-      .select("invoiced_pesewas, feeding_pesewas, paid_pesewas, balance_pesewas, children!inner(first_name, last_name, status)")
+      .select("invoiced_pesewas, feeding_pesewas, paid_pesewas, balance_pesewas, first_name, last_name, status")
       .order("balance_pesewas", { ascending: false });
     rows = [
       ["Child", "Status", "Invoiced (GHS)", "Feeding (GHS)", "Paid (GHS)", "Balance (GHS)"],
       ...(data ?? []).map((b) => {
-        const c = b.children as unknown as { first_name: string; last_name: string; status: string };
         return [
-          `${c.first_name} ${c.last_name}`,
-          c.status,
+          `${b.first_name} ${b.last_name}`,
+          b.status,
           ghs(Number(b.invoiced_pesewas)),
           ghs(Number(b.feeding_pesewas)),
           ghs(Number(b.paid_pesewas)),
