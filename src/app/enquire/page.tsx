@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Script from "next/script";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/form-status";
@@ -10,8 +11,10 @@ export const metadata: Metadata = {
   description: "Ask about a place for your child at DD Busy Bees Montessori.",
 };
 
-export default function EnquirePage() {
+export default async function EnquirePage() {
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+  // The bot-check script needs this page's nonce to pass the Content-Security-Policy.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <main className="mx-auto max-w-xl px-4 py-10">
       <p className="text-sm font-semibold uppercase tracking-wide text-amber-700">DD Busy Bees Montessori</p>
@@ -85,7 +88,7 @@ export default function EnquirePage() {
           </p>
         </ActionForm>
       </div>
-      {siteKey && <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer />}
+      {siteKey && <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" nonce={nonce} async defer />}
     </main>
   );
 }

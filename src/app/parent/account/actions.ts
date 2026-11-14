@@ -28,3 +28,15 @@ export async function setDailySms(enabled: boolean) {
   await supabase.rpc("set_daily_sms", { enabled });
   revalidatePath("/parent/account");
 }
+
+/** Sets (or, when left blank, clears) the address that payment receipts are emailed to. */
+export async function setReceiptEmail(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  await requireRole("parent");
+  const address = String(formData.get("receipt_email") ?? "").trim();
+  if (address && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address)) return { error: "That doesn't look like an email address." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_receipt_email", { address });
+  if (error) return { error: "That didn't save. Please check the address and try again." };
+  revalidatePath("/parent/account");
+  return { success: address ? `Receipts will also be emailed to ${address}.` : "Receipts will come by SMS only." };
+}

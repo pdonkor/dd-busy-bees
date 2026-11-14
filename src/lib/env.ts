@@ -30,6 +30,10 @@ export function serverEnv() {
       PAYSTACK_SECRET_KEY: z.string().optional(),
       // Paystack needs an email address; parents without one get <phone>@<this domain>.
       PAYSTACK_PLACEHOLDER_EMAIL_DOMAIN: z.string().default("parents.ddbusybees.com"),
+      // Resend (resend.com) for receipt and office-invite emails. Optional in development.
+      RESEND_API_KEY: z.string().optional(),
+      // The From address; its domain must be verified in Resend.
+      EMAIL_FROM: z.string().min(3).default("DD Busy Bees <office@ddbusybees.com>"),
       // Cloudflare Turnstile bot check on the public enquiry form (optional).
       TURNSTILE_SECRET_KEY: z.string().optional(),
       // Which school the public enquiry form belongs to; defaults to the only school.

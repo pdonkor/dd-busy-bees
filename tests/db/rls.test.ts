@@ -889,4 +889,42 @@ describe.skipIf(!adminUrl)("database access rules", () => {
       }
     });
   });
+  describe("email", () => {
+    it("lets a parent set or clear only their own receipt email", async () => {
+      await as(ids.parent1, async (c) => {
+        await c.query(`select public.set_receipt_email(' Ama.Parent@Example.com ')`);
+        await c.query(`select public.set_receipt_email(null)`);
+        await c.query("reset role");
+        const { rows } = await c.query(
+          `select id, receipt_email from public.profiles where id in ($1, $2) order by id`,
+          [ids.parent1, ids.parent2],
+        );
+        expect(rows).toEqual([
+          { id: ids.parent1, receipt_email: null },
+          { id: ids.parent2, receipt_email: null },
+        ]);
+      });
+      await as(ids.parent1, async (c) => {
+        await c.query(`select public.set_receipt_email('ama.parent@example.com')`);
+        await c.query("reset role");
+        const { rows } = await c.query(`select receipt_email from public.profiles where id = $1`, [ids.parent1]);
+        expect(rows[0].receipt_email).toBe("ama.parent@example.com");
+      });
+    });
+
+    it("rejects a bad receipt email and ignores non-parents", async () => {
+      await expect(as(ids.parent1, (c) => c.query(`select public.set_receipt_email('not an email')`))).rejects.toThrow(
+        /invalid email/,
+      );
+      await as(ids.teacher1, async (c) => {
+        await c.query(`select public.set_receipt_email('t@example.com')`);
+        await c.query("reset role");
+        const { rows } = await c.query(`select receipt_email from public.profiles where id = $1`, [ids.teacher1]);
+        expect(rows[0].receipt_email).toBeNull();
+      });
+      await expect(as(null, (c) => c.query(`select public.set_receipt_email('a@example.com')`))).rejects.toThrow(
+        /permission denied/,
+      );
+    });
+  });
 });

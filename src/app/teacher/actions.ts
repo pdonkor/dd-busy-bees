@@ -7,7 +7,9 @@ import { requireRole } from "@/lib/auth";
 import { parseDate, today } from "@/lib/dates";
 import { checkPin, MAX_PIN_FAILURES } from "@/lib/pin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logSchema } from "@/lib/logs";
 import { processPhoto, removePhotos, uploadPhoto } from "@/lib/media";
+import { saveLog } from "@/lib/save-log";
 import { createClient } from "@/lib/supabase/server";
 
 // As with the owner actions, these run as the logged-in teacher, so row-level
@@ -132,36 +134,6 @@ export async function checkOutWithPin(childId: string, _prev: ActionState, formD
 
 // Activity logs -------------------------------------------------------------------
 
-const logSchema = z
-  .object({
-    kind: z.enum(["activity", "meal", "nap", "toilet", "mood", "note"]),
-    children: z.array(uuid).min(1, "Choose at least one child."),
-    quick: z.string().trim().max(200).optional(),
-    body: z.string().trim().max(2000).optional(),
-    area_id: z.string().optional(),
-    material_id: z.string().optional(),
-    stage: z.enum(["presented", "practising", "mastered", ""]).optional(),
-    has_photo: z.boolean(),
-  })
-  .transform((v) => {
-    const isActivity = v.kind === "activity";
-    const body = [v.quick, v.body].filter(Boolean).join(". ") || null;
-    return {
-      kind: v.kind,
-      children: v.children,
-      body,
-      area_id: isActivity && v.area_id ? v.area_id : null,
-      material_id: isActivity && v.material_id ? v.material_id : null,
-      stage: isActivity && v.stage ? v.stage : null,
-      has_photo: v.has_photo,
-    };
-  })
-  // A photo on its own is enough of a log.
-  .refine((v) => v.body || v.material_id || v.area_id || v.has_photo, { message: "Add a note or choose what they did." })
-  .refine((v) => [v.area_id, v.material_id].every((x) => x === null || uuid.safeParse(x).success), {
-    message: "Please choose from the list.",
-  });
-
 export async function logActivity(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const user = await requireRole("teacher");
   const photoField = formData.get("photo");
@@ -177,8 +149,7 @@ export async function logActivity(_prev: ActionState, formData: FormData): Promi
     stage: formData.get("stage") ?? undefined,
   });
   if (!parsed.success) return { error: firstIssue(parsed.error) };
-  const { children: childIds, kind, body, area_id, material_id, stage } = parsed.data;
-  const log = { kind, body, area_id, material_id, stage };
+  const childIds = parsed.data.children;
   const supabase = await createClient();
 
   let photo: { full: Buffer; thumb: Buffer } | null = null;
@@ -198,17 +169,7 @@ export async function logActivity(_prev: ActionState, formData: FormData): Promi
 
   // Choose the id here so the children can be tagged without reading the log back.
   const logId = crypto.randomUUID();
-  const { error } = await supabase
-    .from("activity_logs")
-    .insert({ ...log, id: logId, school_id: user.schoolId, logged_by: user.id });
-  if (error) return { error: FAILED };
-  const { error: tagError } = await supabase
-    .from("activity_children")
-    .insert(childIds.map((child_id) => ({ log_id: logId, child_id, school_id: user.schoolId })));
-  if (tagError) {
-    await supabase.from("activity_logs").delete().eq("id", logId);
-    return { error: FAILED };
-  }
+  if ((await saveLog(supabase, user, parsed.data, { id: logId })) !== "saved") return { error: FAILED };
 
   if (photo) {
     const mediaId = crypto.randomUUID();

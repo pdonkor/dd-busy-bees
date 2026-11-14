@@ -43,7 +43,18 @@ or texted until you switch to live keys at the end.
 2. Register the sender ID **BusyBees** (approval can take a few days).
 3. Copy the API key into `ARKESEL_API_KEY`.
 
-## 4. Paystack (mobile money and card payments)
+## 4. Resend (email)
+
+Office (admin) invites are only ever sent by email, and parents can choose to get
+receipts by email too.
+
+1. Create an account at resend.com.
+2. **Domains → Add domain**: add the school's domain (for example `ddbusybees.com`) and
+   add the DNS records it shows at your domain registrar. Wait for it to say *Verified*.
+3. **API Keys → Create**: copy it into `RESEND_API_KEY`, and set `EMAIL_FROM` to an
+   address on that domain, for example `DD Busy Bees <office@ddbusybees.com>`.
+
+## 5. Paystack (mobile money and card payments)
 
 1. Create a Paystack Ghana business account and complete the compliance form (business
    registration, bank or MoMo account for payouts).
@@ -54,7 +65,7 @@ or texted until you switch to live keys at the end.
    The invoice should show as paid within seconds and a receipt SMS should arrive.
 4. When Paystack approves the account, swap in the **live** secret key and redeploy.
 
-## 5. Create the owner account
+## 6. Create the owner account
 
 From this repo, with `.env.local` filled in:
 
@@ -65,7 +76,7 @@ npm run create-owner -- --school "DD Busy Bees" --name "Your Name" --email you@e
 Log in at the app address, scan the QR code with Google Authenticator or Authy, and
 you're in.
 
-## 6. First day in the app (owner)
+## 7. First day in the app (owner)
 
 1. **Settings**: stand at the entrance and press *Use this device's location*, so staff
    can only clock in on the premises.
@@ -77,6 +88,11 @@ you're in.
    fee plan and feeding plan on their **Fees** page, and invite their parents.
 6. **Upkeep tasks**: press *Add Ghana starter list* and edit it.
 7. Open **Staff on site → Open entrance QR screen** on a tablet or old phone at the entrance.
+
+## Before opening to families
+
+Work through [SECURITY.md](SECURITY.md): the Supabase security settings, the load test
+and a backup restore.
 
 ## Optional
 

@@ -68,7 +68,8 @@ export async function submitEnquiry(_prev: ActionState, formData: FormData): Pro
   if (!parsed.success) return { error: firstIssue(parsed.error) };
 
   const h = await headers();
-  const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+  // Vercel sets x-real-ip itself, so a visitor can't fake it to dodge the hourly limit.
+  const ip = h.get("x-real-ip")?.trim() || (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
   if (!(await passesBotCheck(String(formData.get("cf-turnstile-response") ?? "") || null, ip))) {
     return { error: "Please complete the check that you're not a robot." };
   }
