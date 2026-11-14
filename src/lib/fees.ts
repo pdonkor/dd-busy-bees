@@ -1,7 +1,9 @@
 import "server-only";
 import { termInvoiceLines, type BillableChild } from "@/lib/billing";
 import { formatGhs, paymentLabel } from "@/lib/money";
-import { sendBatch } from "@/lib/notify";
+import { simpleEmail } from "@/lib/email";
+import { serverEnv } from "@/lib/env";
+import { sendBatch, sendEmailBatch } from "@/lib/notify";
 import type { PaystackTransaction } from "@/lib/paystack";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
@@ -125,11 +127,14 @@ export async function settlePaystackPayment(admin: Admin, tx: PaystackTransactio
   return "settled";
 }
 
-/** SMS receipt to the child's parents, with the new balance. */
+/**
+ * Thanks each parent of the child for a payment: by SMS to their phone, and by email
+ * when they've given a receipt address. Each goes at most once per parent.
+ */
 export async function sendReceipt(admin: Admin, paymentId: string) {
   const { data: p } = await admin
     .from("payments")
-    .select("id, school_id, child_id, amount_pesewas, method, channel, children(first_name)")
+    .select("id, school_id, child_id, amount_pesewas, method, channel, paid_at, children(first_name, last_name), schools(name)")
     .eq("id", paymentId)
     .single();
   if (!p) return;
@@ -137,26 +142,64 @@ export async function sendReceipt(admin: Admin, paymentId: string) {
     admin.from("child_balances").select("balance_pesewas").eq("child_id", p.child_id).single(),
     admin
       .from("guardians")
-      .select("parent_id, profiles!inner(phone, active)")
+      .select("parent_id, profiles!inner(phone, receipt_email, active)")
       .eq("child_id", p.child_id)
-      .eq("profiles.active", true)
-      .not("profiles.phone", "is", null),
+      .eq("profiles.active", true),
   ]);
-  const name = (p.children as unknown as { first_name: string } | null)?.first_name ?? "your child";
+  const child = p.children as unknown as { first_name: string; last_name: string } | null;
+  const name = child?.first_name ?? "your child";
+  const school = (p.schools as unknown as { name: string } | null)?.name ?? "DD Busy Bees";
   const owed = Number(balance?.balance_pesewas ?? 0);
+  const balanceText =
+    owed > 0 ? `Balance now ${formatGhs(owed)}.` : owed < 0 ? `In credit ${formatGhs(-owed)}.` : "Fees fully paid.";
+  const ref = p.id.slice(0, 8).toUpperCase();
   const message =
     `DD Busy Bees: received ${formatGhs(p.amount_pesewas)} for ${name} (${paymentLabel(p)}). ` +
-    (owed > 0 ? `Balance now ${formatGhs(owed)}.` : owed < 0 ? `In credit ${formatGhs(-owed)}.` : "Fees fully paid.") +
-    ` Receipt ref ${p.id.slice(0, 8).toUpperCase()}. Thank you!`;
+    `${balanceText} Receipt ref ${ref}. Thank you!`;
+  const parents = (guardians ?? []).map((g) => ({
+    id: g.parent_id,
+    ...(g.profiles as unknown as { phone: string | null; receipt_email: string | null }),
+  }));
+
   await sendBatch(
     admin,
-    (guardians ?? []).map((g) => ({
+    parents
+      .filter((g) => g.phone)
+      .map((g) => ({
+        schoolId: p.school_id,
+        kind: "receipt",
+        dedupeKey: `receipt:${p.id}:${g.id}`,
+        to: g.phone!,
+        message,
+        recipientId: g.id,
+        childId: p.child_id,
+      })),
+  );
+
+  const emailed = parents.filter((g) => g.receipt_email);
+  if (!emailed.length) return;
+  const body = simpleEmail({
+    school,
+    heading: `Payment received: ${formatGhs(p.amount_pesewas)}`,
+    paragraphs: [`Thank you. We've received your payment for ${name}.`, balanceText],
+    rows: [
+      ["Child", child ? `${child.first_name} ${child.last_name}` : name],
+      ["Amount", formatGhs(p.amount_pesewas)],
+      ["Paid by", paymentLabel(p)],
+      ["Date", (p.paid_at ?? new Date().toISOString()).slice(0, 10)],
+      ["Receipt ref", ref],
+    ],
+    button: { label: "See fees and receipts", url: `${serverEnv().APP_URL}/parent/fees` },
+    footer: `${school}. You get this email because you asked for receipts by email in the app.`,
+  });
+  await sendEmailBatch(
+    admin,
+    emailed.map((g) => ({
       schoolId: p.school_id,
-      kind: "receipt",
-      dedupeKey: `receipt:${p.id}:${g.parent_id}`,
-      to: (g.profiles as unknown as { phone: string }).phone,
-      message,
-      recipientId: g.parent_id,
+      kind: "receipt-email",
+      dedupeKey: `receipt-email:${p.id}:${g.id}`,
+      email: { to: g.receipt_email!, subject: `${school}: receipt ${ref} for ${name}`, ...body },
+      recipientId: g.id,
       childId: p.child_id,
     })),
   );

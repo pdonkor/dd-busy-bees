@@ -3,13 +3,13 @@ import { SubmitButton } from "@/components/form-status";
 import { Card, Field, Input, PageHeader } from "@/components/ui";
 import { requireRole } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { setDailySms, setPickupPin } from "./actions";
+import { setDailySms, setPickupPin, setReceiptEmail } from "./actions";
 
 export default async function AccountPage() {
   const user = await requireRole("parent");
   const supabase = await createClient();
   const [{ data: profile }, { data: hasPin }] = await Promise.all([
-    supabase.from("profiles").select("phone, email, daily_sms").eq("id", user.id).single(),
+    supabase.from("profiles").select("phone, email, daily_sms, receipt_email").eq("id", user.id).single(),
     supabase.rpc("has_pickup_pin"),
   ]);
 
@@ -44,6 +44,23 @@ export default async function AccountPage() {
           <form action={setDailySms.bind(null, !profile?.daily_sms)}>
             <SubmitButton variant="secondary">{profile?.daily_sms ? "Switch off" : "Switch on"}</SubmitButton>
           </form>
+        </Card>
+        <Card title="Receipts by email">
+          <p className="mb-3 text-sm text-stone-600">
+            Receipts always come by SMS. Add an email address to get them by email as well, or clear it to stop.
+          </p>
+          <ActionForm action={setReceiptEmail}>
+            <Field label="Email address">
+              <Input
+                name="receipt_email"
+                type="email"
+                autoComplete="email"
+                maxLength={200}
+                defaultValue={profile?.receipt_email ?? ""}
+              />
+            </Field>
+            <SubmitButton variant="secondary">Save</SubmitButton>
+          </ActionForm>
         </Card>
       </div>
     </>

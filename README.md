@@ -36,5 +36,6 @@ migration and check, role by role, who can read and write what.
   show one family another family's data. Migrations live in `supabase/migrations/`.
 - Money is stored in pesewas. Paystack payments are only marked paid after Paystack's
   signed webhook or a server-to-server verify, with the amount checked.
-- SMS goes through Arkesel; every automatic SMS is sent at most once (see `src/lib/notify.ts`).
+- SMS goes through Arkesel and email through Resend; every automatic message is sent at most
+  once (see `src/lib/notify.ts`). Office invites go only to the invited mailbox.
 - Scheduled jobs are in `vercel.json` and `src/app/api/cron/`.
