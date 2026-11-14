@@ -10,6 +10,7 @@ export const classSchema = z
     capacity: optionalNumber(z.number().int("Places must be a whole number.").min(1).max(200)),
     min_age_years: optionalNumber(z.number().min(0).max(12)),
     max_age_years: optionalNumber(z.number().min(0).max(12)),
+    ratio_children_per_adult: optionalNumber(z.number().int("The ratio must be a whole number.").min(1).max(40)),
   })
   .refine((v) => v.min_age_years === undefined || v.max_age_years === undefined || v.min_age_years <= v.max_age_years, {
     message: "The youngest age must be below the oldest age.",
@@ -21,5 +22,6 @@ export function classRow(data: z.infer<typeof classSchema>) {
     capacity: data.capacity ?? null,
     min_age_months: data.min_age_years === undefined ? null : Math.round(data.min_age_years * 12),
     max_age_months: data.max_age_years === undefined ? null : Math.round(data.max_age_years * 12),
+    ratio_children_per_adult: data.ratio_children_per_adult ?? null,
   };
 }

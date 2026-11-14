@@ -22,6 +22,18 @@ export function serverEnv() {
       SEND_SMS_HOOK_SECRET: z.string().optional(),
       ARKESEL_API_KEY: z.string().optional(),
       SMS_SENDER_ID: z.string().max(11).default("BusyBees"),
+      // Signs the rotating clock-in QR code. Any random string of 32+ characters.
+      CLOCK_QR_SECRET: z.string().min(32).optional(),
+      // Vercel Cron sends this as a bearer token to the scheduled jobs.
+      CRON_SECRET: z.string().min(16).optional(),
+      // Paystack secret key (sk_test_… or sk_live_…); it also verifies webhook signatures.
+      PAYSTACK_SECRET_KEY: z.string().optional(),
+      // Paystack needs an email address; parents without one get <phone>@<this domain>.
+      PAYSTACK_PLACEHOLDER_EMAIL_DOMAIN: z.string().default("parents.ddbusybees.com"),
+      // Cloudflare Turnstile bot check on the public enquiry form (optional).
+      TURNSTILE_SECRET_KEY: z.string().optional(),
+      // Which school the public enquiry form belongs to; defaults to the only school.
+      PUBLIC_SCHOOL_ID: z.string().uuid().optional(),
     })
     .parse(process.env);
 }
